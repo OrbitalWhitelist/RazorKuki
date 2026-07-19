@@ -5,21 +5,34 @@ import { CookieJar } from "tough-cookie";
 export interface RefreshResult {
   newCookie: string | null;
   status: string;
-  debug: string[];
+  debug: string;
 }
 
 /**
  * Refreshes a Roblox .ROBLOSECURITY cookie.
- * Uses axios + tough-cookie so the cookie jar is maintained across both
- * requests exactly like Python's requests.Session does.
+ *
+ * Flow:
+ *   1. POST /v2/logoutfromallsessionsandreauthenticate without CSRF
+ *      → Roblox returns 403 + x-csrf-token header (session is still alive)
+ *   2. POST the same endpoint again WITH the CSRF token
+ *      → Roblox logs out all sessions, issues a brand-new .ROBLOSECURITY cookie
+ *
+ * We intentionally never call /v2/logout because that invalidates the cookie
+ * before we can use it for the re-auth step.
  */
 export async function refreshCookie(cookie: string): Promise<RefreshResult> {
-  const debug: string[] = [];
-  debug.push(`📥 Cookie received (length: ${cookie.length})`);
+  const lines: string[] = [];
+  const log = (msg: string) => lines.push(msg);
+  const buildDebug = () => lines.join("\n");
+
+  log(`📥 Cookie received (length: ${cookie.length})`);
 
   const jar = new CookieJar();
-  await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}`, "https://auth.roblox.com");
-  debug.push("✅ Cookie loaded into jar");
+  await jar.setCookie(
+    `.ROBLOSECURITY=${cookie.trim()}`,
+    "https://auth.roblox.com",
+  );
+  log("✅ Cookie loaded into jar");
 
   const client = wrapper(
     axios.create({
@@ -31,70 +44,81 @@ export async function refreshCookie(cookie: string): Promise<RefreshResult> {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
-      // Don't throw on non-2xx so we can read the status ourselves
       validateStatus: () => true,
     }),
   );
 
   try {
-    // STEP 1 — POST /v2/logout to obtain CSRF token
-    debug.push("📤 POST /v2/logout ...");
-    const csrfResp = await client.post("/v2/logout");
-    debug.push(`↩️  /v2/logout → status ${csrfResp.status}`);
+    // STEP 1 — hit the reauth endpoint without a CSRF token to harvest it
+    // Roblox returns 403 + x-csrf-token; the cookie stays valid
+    log("📤 POST /v2/logoutfromallsessionsandreauthenticate (no CSRF, expecting 403)…");
+    const csrfResp = await client.post(
+      "/v2/logoutfromallsessionsandreauthenticate",
+      {},
+    );
+    log(`↩️  Status: ${csrfResp.status}`);
 
     const csrf = csrfResp.headers["x-csrf-token"] as string | undefined;
     if (!csrf) {
-      debug.push(`❌ CSRF token missing (status ${csrfResp.status})`);
-      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug };
+      log(`❌ x-csrf-token header not present (status ${csrfResp.status})`);
+      log(`📋 Response headers: ${JSON.stringify(csrfResp.headers)}`);
+      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: buildDebug() };
     }
-    debug.push(`🔑 CSRF token: ${csrf.slice(0, 20)}…`);
+    log(`🔑 CSRF token obtained: ${csrf.slice(0, 20)}…`);
 
-    // STEP 2 — logout from all sessions and get a fresh cookie
-    debug.push("📤 POST /v2/logoutfromallsessionsandreauthenticate ...");
+    // STEP 2 — re-auth with the CSRF token; this invalidates all sessions
+    // and the response sets a fresh .ROBLOSECURITY cookie
+    log("📤 POST /v2/logoutfromallsessionsandreauthenticate (with CSRF)…");
     const reauthResp = await client.post(
       "/v2/logoutfromallsessionsandreauthenticate",
       {},
       { headers: { "X-CSRF-TOKEN": csrf } },
     );
-    debug.push(`↩️  Re-auth → status ${reauthResp.status}`);
+    log(`↩️  Re-auth status: ${reauthResp.status}`);
 
     if (reauthResp.status === 200) {
-      // Try the cookie jar first — axios-cookiejar-support stores Set-Cookie automatically
-      const cookies = await jar.getCookies("https://auth.roblox.com");
-      debug.push(`🍪 Jar has ${cookies.length} cookie(s)`);
-      const robloxCookie = cookies.find((c) => c.key === ".ROBLOSECURITY");
+      // Try the jar first — axios-cookiejar-support captures Set-Cookie automatically
+      const allCookies = await jar.getCookies("https://auth.roblox.com");
+      log(`🍪 Jar has ${allCookies.length} cookie(s) after re-auth`);
 
-      if (robloxCookie) {
-        debug.push(`✅ New cookie from jar: ${robloxCookie.value.slice(0, 10)}…`);
-        return { newCookie: robloxCookie.value, status: "SUCCESS", debug };
+      // The jar will still contain the OLD cookie plus potentially the new one.
+      // getCookies returns the most-recently-set cookie last, so we look for
+      // one whose value differs from what was passed in.
+      const trimmed = cookie.trim();
+      const newCookieFromJar = allCookies
+        .filter((c) => c.key === ".ROBLOSECURITY" && c.value !== trimmed)
+        .pop();
+
+      if (newCookieFromJar) {
+        log(`✅ New cookie extracted from jar: ${newCookieFromJar.value.slice(0, 10)}…`);
+        return { newCookie: newCookieFromJar.value, status: "SUCCESS", debug: buildDebug() };
       }
 
-      // Fallback — parse Set-Cookie headers directly
+      // Fallback — parse Set-Cookie response headers directly
       const setCookie = reauthResp.headers["set-cookie"];
-      debug.push(`📋 Raw Set-Cookie: ${JSON.stringify(setCookie)}`);
+      log(`📋 Raw Set-Cookie header: ${JSON.stringify(setCookie)}`);
       if (Array.isArray(setCookie)) {
         for (const raw of setCookie) {
           const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
-          if (match) {
-            debug.push(`✅ New cookie from header: ${match[1].slice(0, 10)}…`);
-            return { newCookie: match[1], status: "SUCCESS", debug };
+          if (match && match[1] !== trimmed) {
+            log(`✅ New cookie extracted from Set-Cookie header: ${match[1].slice(0, 10)}…`);
+            return { newCookie: match[1], status: "SUCCESS", debug: buildDebug() };
           }
         }
       }
 
-      debug.push("⚠️  No .ROBLOSECURITY found in response");
-      return { newCookie: null, status: "SUCCESS_NO_COOKIE", debug };
+      log("⚠️  Re-auth returned 200 but no new .ROBLOSECURITY cookie found");
+      return { newCookie: null, status: "SUCCESS_NO_COOKIE", debug: buildDebug() };
     }
 
-    debug.push(`❌ Re-auth failed with status ${reauthResp.status}`);
-    return { newCookie: null, status: `ERROR_${reauthResp.status}`, debug };
+    log(`❌ Re-auth returned unexpected status ${reauthResp.status}`);
+    if (reauthResp.data) {
+      log(`📄 Response body: ${JSON.stringify(reauthResp.data)}`);
+    }
+    return { newCookie: null, status: `ERROR_${reauthResp.status}`, debug: buildDebug() };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    debug.push(`💥 Exception: ${message}`);
-    const axiosErr = err as { response?: { data?: unknown } };
-    if (axiosErr.response?.data) {
-      debug.push(`📄 Response data: ${JSON.stringify(axiosErr.response.data)}`);
-    }
-    return { newCookie: null, status: `EXCEPTION_${message}`, debug };
+    log(`💥 Exception: ${message}`);
+    return { newCookie: null, status: `EXCEPTION_${message}`, debug: buildDebug() };
   }
 }

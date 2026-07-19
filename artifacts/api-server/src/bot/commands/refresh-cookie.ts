@@ -29,28 +29,35 @@ export async function handleRefreshCookie(
     if (result.newCookie) break;
   }
 
+  const debugBlock = result?.debug
+    ? `\n\n**🔍 Debug log:**\n\`\`\`\n${result.debug}\n\`\`\``
+    : "";
+
   if (!result || !result.newCookie) {
-    await interaction.editReply("❌ **Refresh failed**");
-    for (const line of result?.debug ?? []) {
-      await interaction.followUp({ content: line, ephemeral: true });
-    }
+    await interaction.editReply(
+      `❌ **Refresh failed** (status: \`${result?.status ?? "unknown"}\`)${debugBlock}`,
+    );
     return;
   }
 
-  // Success — confirmation + debug logs + two copy-friendly versions
-  await interaction.editReply("✅ **Cookie re-sessioned!**");
-
-  for (const line of result.debug) {
-    await interaction.followUp({ content: line, ephemeral: true });
-  }
-
-  await interaction.followUp({
-    content: `📱 **Mobile copy:**\n\`${result.newCookie}\``,
-    ephemeral: true,
-  });
-
-  await interaction.followUp({
-    content: `💻 **PC copy:**\n\`\`\`\n${result.newCookie}\n\`\`\``,
-    ephemeral: true,
-  });
+  // Single message: status + debug + old cookie + new cookie
+  await interaction.editReply(
+    [
+      "✅ **Cookie re-sessioned!**",
+      "",
+      `**📥 Old cookie (you pasted):**`,
+      `\`\`\``,
+      cookie,
+      `\`\`\``,
+      "",
+      `**📤 New cookie:**`,
+      `\`${result.newCookie}\``,
+      "",
+      `**💻 New cookie (copy-friendly):**`,
+      `\`\`\``,
+      result.newCookie,
+      `\`\`\``,
+      debugBlock,
+    ].join("\n"),
+  );
 }

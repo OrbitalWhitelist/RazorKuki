@@ -1,0 +1,93 @@
+import axios from 'axios';
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
+
+export interface RefreshResult {
+  newCookie: string | null;
+  status: string;
+  debug: string[];
+}
+
+export async function refreshCookie(cookie: string): Promise<RefreshResult> {
+  const debug: string[] = [];
+  debug.push(`📥 Cookie length: ${cookie.length}`);
+
+  const jar = new CookieJar();
+  await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}`, 'https://auth.roblox.com');
+  debug.push('✅ Cookie set in jar');
+
+  const client = wrapper(
+    axios.create({
+      baseURL: 'https://auth.roblox.com',
+      jar,
+      withCredentials: true,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      // 🔥 THIS IS THE FIX: Don't throw on 4xx/5xx
+      validateStatus: () => true,
+    })
+  );
+
+  try {
+    // STEP 1 – get CSRF (may return 403/401 – that's OK)
+    debug.push('📤 POST /v2/logout ...');
+    const csrfResp = await client.post('/v2/logout');
+    debug.push(`↩️  /v2/logout → status ${csrfResp.status}`);
+
+    // Log all headers for debugging
+    debug.push(`📋 Headers: ${JSON.stringify(csrfResp.headers)}`);
+
+    const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
+    if (!csrf) {
+      debug.push(`❌ CSRF token missing (status ${csrfResp.status})`);
+      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug };
+    }
+    debug.push(`🔑 CSRF: ${csrf.slice(0, 20)}…`);
+
+    // STEP 2 – re‑auth
+    debug.push('📤 POST /v2/logoutfromallsessionsandreauthenticate ...');
+    const reauthResp = await client.post(
+      '/v2/logoutfromallsessionsandreauthenticate',
+      {},
+      { headers: { 'X-CSRF-TOKEN': csrf } }
+    );
+    debug.push(`↩️  Re‑auth → status ${reauthResp.status}`);
+
+    if (reauthResp.status === 200) {
+      // Try jar first
+      const cookies = await jar.getCookies('https://auth.roblox.com');
+      debug.push(`🍪 Jar has ${cookies.length} cookie(s)`);
+      const robloxCookie = cookies.find(c => c.key === '.ROBLOSECURITY');
+
+      if (robloxCookie) {
+        debug.push(`✅ Extracted from jar: ${robloxCookie.value.slice(0, 10)}…`);
+        return { newCookie: robloxCookie.value, status: 'SUCCESS', debug };
+      }
+
+      // Fallback – parse Set-Cookie headers (axios lowercases header names)
+      const setCookie = reauthResp.headers['set-cookie'] || reauthResp.headers['Set-Cookie'];
+      debug.push(`📋 Set-Cookie: ${JSON.stringify(setCookie)}`);
+      if (Array.isArray(setCookie)) {
+        for (const raw of setCookie) {
+          const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
+          if (match) {
+            debug.push(`✅ Extracted from Set-Cookie: ${match[1].slice(0, 10)}…`);
+            return { newCookie: match[1], status: 'SUCCESS', debug };
+          }
+        }
+      }
+
+      debug.push('⚠️  No .ROBLOSECURITY found anywhere');
+      return { newCookie: null, status: 'SUCCESS_NO_COOKIE', debug };
+    }
+
+    debug.push(`❌ Re‑auth failed with ${reauthResp.status}`);
+    return { newCookie: null, status: `ERROR_${reauthResp.status}`, debug };
+  } catch (err: any) {
+    // This catch should only trigger for network errors now (since validateStatus bypasses status errors)
+    debug.push(`💥 Network error: ${err.message}`);
+    return { newCookie: null, status: `NETWORK_ERROR_${err.message}`, debug };
+  }
+}
