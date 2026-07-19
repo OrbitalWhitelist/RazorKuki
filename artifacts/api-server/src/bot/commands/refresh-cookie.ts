@@ -3,7 +3,7 @@ import {
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
-import { refreshCookie } from "../roblox";
+import { refreshCookie, type RefreshResult } from "../roblox";
 
 export const refreshCookieCommand = new SlashCommandBuilder()
   .setName("rcookie")
@@ -23,33 +23,34 @@ export async function handleRefreshCookie(
 
   const cookie = interaction.options.getString("cookie", true).trim();
 
-  // Try up to 2 times
-  let newCookie: string | null = null;
+  let result: RefreshResult | null = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const result = await refreshCookie(cookie);
-    if (result.newCookie) {
-      newCookie = result.newCookie;
-      break;
-    }
+    result = await refreshCookie(cookie);
+    if (result.newCookie) break;
   }
 
-  if (!newCookie) {
-    await interaction.editReply("Failed");
+  if (!result || !result.newCookie) {
+    await interaction.editReply("❌ **Refresh failed**");
+    for (const line of result?.debug ?? []) {
+      await interaction.followUp({ content: line, ephemeral: true });
+    }
     return;
   }
 
-  // Success — confirmation, then two copy-friendly versions
+  // Success — confirmation + debug logs + two copy-friendly versions
   await interaction.editReply("✅ **Cookie re-sessioned!**");
 
-  // Mobile copy — inline backtick, easy to long-press select on phone
+  for (const line of result.debug) {
+    await interaction.followUp({ content: line, ephemeral: true });
+  }
+
   await interaction.followUp({
-    content: `📱 **Mobile copy:**\n\`${newCookie}\``,
+    content: `📱 **Mobile copy:**\n\`${result.newCookie}\``,
     ephemeral: true,
   });
 
-  // PC copy — code block, easy to click-copy on desktop
   await interaction.followUp({
-    content: `💻 **PC copy:**\n\`\`\`\n${newCookie}\n\`\`\``,
+    content: `💻 **PC copy:**\n\`\`\`\n${result.newCookie}\n\`\`\``,
     ephemeral: true,
   });
 }
