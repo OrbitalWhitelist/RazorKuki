@@ -11,8 +11,12 @@ import {
   refreshCookieCommand,
   handleRefreshCookie,
 } from "./commands/refresh-cookie";
+import {
+  logCookieCommand,
+  handleLogCookie,
+} from "./commands/log-cookie";
 
-const COMMANDS = [refreshCookieCommand];
+const COMMANDS = [refreshCookieCommand, logCookieCommand];
 
 export async function startBot(): Promise<void> {
   const token = process.env["DISCORD_BOT_TOKEN"];
@@ -104,6 +108,9 @@ export async function startBot(): Promise<void> {
       switch (interaction.commandName) {
         case "rcookie":
           await handleRefreshCookie(interaction);
+          break;
+        case "log":
+          await handleLogCookie(interaction);
           break;
         default:
           logger.warn(

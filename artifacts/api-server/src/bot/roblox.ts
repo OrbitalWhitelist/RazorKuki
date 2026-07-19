@@ -2,6 +2,56 @@ import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
 
+export interface ValidateResult {
+  valid: boolean;
+  username?: string;
+  displayName?: string;
+  userId?: number;
+  debug: string;
+}
+
+/**
+ * Validates a Roblox .ROBLOSECURITY cookie WITHOUT modifying the session.
+ * Uses a plain GET request — no CSRF required, no side effects, cannot invalidate the cookie.
+ */
+export async function validateCookie(cookie: string): Promise<ValidateResult> {
+  const lines: string[] = [];
+  const log = (msg: string) => lines.push(msg);
+
+  log(`📥 Cookie length: ${cookie.length}`);
+
+  try {
+    log('📤 GET https://users.roblox.com/v1/users/authenticated …');
+    const resp = await axios.get('https://users.roblox.com/v1/users/authenticated', {
+      headers: {
+        Cookie: `.ROBLOSECURITY=${cookie.trim()}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      validateStatus: () => true,
+    });
+
+    log(`↩️  Status: ${resp.status}`);
+
+    if (resp.status === 200) {
+      const { id, name, displayName } = resp.data as { id: number; name: string; displayName: string };
+      log(`✅ Authenticated as: ${name} (${displayName}) — ID ${id}`);
+      return { valid: true, username: name, displayName, userId: id, debug: lines.join('\n') };
+    }
+
+    if (resp.status === 401) {
+      log('❌ Cookie is invalid or expired (401 Unauthorized)');
+    } else {
+      log(`⚠️  Unexpected status ${resp.status}`);
+      log(`📄 Body: ${JSON.stringify(resp.data)}`);
+    }
+
+    return { valid: false, debug: lines.join('\n') };
+  } catch (err: any) {
+    log(`💥 Network error: ${err.message}`);
+    return { valid: false, debug: lines.join('\n') };
+  }
+}
+
 export interface RefreshResult {
   newCookie: string | null;
   status: string;
