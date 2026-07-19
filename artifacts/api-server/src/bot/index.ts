@@ -7,33 +7,12 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { botState } from "./status";
-import { addCookieCommand, handleAddCookie } from "./commands/add-cookie";
 import {
   refreshCookieCommand,
   handleRefreshCookie,
 } from "./commands/refresh-cookie";
-import {
-  listCookiesCommand,
-  handleListCookies,
-} from "./commands/list-cookies";
-import {
-  checkCookieCommand,
-  handleCheckCookie,
-} from "./commands/check-cookie";
-import {
-  removeCookieCommand,
-  handleRemoveCookie,
-} from "./commands/remove-cookie";
-import { testCommand, createTestHandler } from "./commands/test";
 
-const COMMANDS = [
-  addCookieCommand,
-  refreshCookieCommand,
-  listCookiesCommand,
-  checkCookieCommand,
-  removeCookieCommand,
-  testCommand,
-];
+const COMMANDS = [refreshCookieCommand];
 
 export async function startBot(): Promise<void> {
   const token = process.env["DISCORD_BOT_TOKEN"];
@@ -55,11 +34,8 @@ export async function startBot(): Promise<void> {
 
   const client = new Client({
     intents: [GatewayIntentBits.Guilds],
-    // Disable DM channels entirely at the gateway level
     allowedMentions: { parse: [] },
   });
-
-  const handleTest = createTestHandler(client);
 
   // Use clientReady to suppress the v14 deprecation warning
   client.once("clientReady", async (c) => {
@@ -68,9 +44,7 @@ export async function startBot(): Promise<void> {
     botState.readyAt = new Date();
     logger.info({ tag: c.user.tag }, "⚔️  Razor Tools bot is online");
 
-    // Register as GLOBAL commands — no guild scope required so no "Missing Access" error.
-    // They appear in every server the bot is in, but the guild whitelist below
-    // ensures they ONLY WORK in the allowed server.
+    // Register global slash commands — only /rcookie
     const rest = new REST({ version: "10" }).setToken(token);
     try {
       await rest.put(Routes.applicationCommands(c.application.id), {
@@ -108,7 +82,6 @@ export async function startBot(): Promise<void> {
     }
 
     // 2. Owner whitelist — if OWNER_IDS is set, only those user IDs may run commands.
-    //    Set OWNER_IDS as a comma-separated list of Discord user IDs, e.g. "123456,789012"
     const ownerIds = (process.env["OWNER_IDS"] ?? "")
       .split(",")
       .map((id) => id.trim())
@@ -129,23 +102,8 @@ export async function startBot(): Promise<void> {
 
     try {
       switch (interaction.commandName) {
-        case "add-cookie":
-          await handleAddCookie(interaction);
-          break;
         case "rcookie":
           await handleRefreshCookie(interaction);
-          break;
-        case "list-cookies":
-          await handleListCookies(interaction);
-          break;
-        case "check-cookie":
-          await handleCheckCookie(interaction);
-          break;
-        case "remove-cookie":
-          await handleRemoveCookie(interaction);
-          break;
-        case "test":
-          await handleTest(interaction);
           break;
         default:
           logger.warn(
