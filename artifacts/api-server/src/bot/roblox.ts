@@ -42,10 +42,20 @@ export async function refreshCookie(cookie: string): Promise<RefreshResult> {
   );
 
   if (resp.status === 200) {
-    const setCookie = resp.headers.get("set-cookie") ?? "";
-    const match = setCookie.match(/\.ROBLOSECURITY=([^;]+)/);
-    if (match) {
-      return { newCookie: match[1], status: "SUCCESS" };
+    // Use getSetCookie() so each Set-Cookie header is its own string.
+    // headers.get("set-cookie") joins them with ", " which breaks the regex
+    // when Roblox sends multiple Set-Cookie headers on this response.
+    const setCookieHeaders = resp.headers.getSetCookie();
+    let newCookieValue: string | null = null;
+    for (const header of setCookieHeaders) {
+      const match = header.match(/\.ROBLOSECURITY=([^;]+)/);
+      if (match) {
+        newCookieValue = match[1];
+        break;
+      }
+    }
+    if (newCookieValue) {
+      return { newCookie: newCookieValue, status: "SUCCESS" };
     }
     return { newCookie: null, status: "SUCCESS_NO_COOKIE" };
   }
