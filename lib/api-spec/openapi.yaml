@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: bot
+    description: Bot status
 paths:
   /healthz:
     get:
@@ -24,6 +26,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /bot-status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get Discord bot connection status
+      description: Returns whether the Razor Tools bot is currently online
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +48,16 @@ components:
           type: string
       required:
         - status
-
+    BotStatus:
+      type: object
+      properties:
+        online:
+          type: boolean
+        tag:
+          type: ["string", "null"]
+        readyAt:
+          type: ["string", "null"]
+      required:
+        - online
+        - tag
+        - readyAt

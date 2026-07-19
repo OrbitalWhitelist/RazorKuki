@@ -6,6 +6,7 @@ import {
   type Interaction,
 } from "discord.js";
 import { logger } from "../lib/logger";
+import { botState } from "./status";
 import { addCookieCommand, handleAddCookie } from "./commands/add-cookie";
 import {
   refreshCookieCommand,
@@ -62,6 +63,9 @@ export async function startBot(): Promise<void> {
 
   // Use clientReady to suppress the v14 deprecation warning
   client.once("clientReady", async (c) => {
+    botState.online = true;
+    botState.tag = c.user.tag;
+    botState.readyAt = new Date();
     logger.info({ tag: c.user.tag }, "⚔️  Razor Tools bot is online");
 
     // Register as GLOBAL commands — no guild scope required so no "Missing Access" error.
@@ -165,6 +169,11 @@ export async function startBot(): Promise<void> {
 
   client.on("error", (err) => {
     logger.error({ err }, "Discord client error");
+  });
+
+  client.on("shardDisconnect", () => {
+    botState.online = false;
+    logger.warn("Discord bot disconnected");
   });
 
   await client.login(token);
