@@ -132,7 +132,7 @@ export async function startBot(): Promise<void> {
         case "add-cookie":
           await handleAddCookie(interaction);
           break;
-        case "refresh-cookie":
+        case "rcookie":
           await handleRefreshCookie(interaction);
           break;
         case "list-cookies":

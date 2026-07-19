@@ -1,21 +1,20 @@
 import {
   SlashCommandBuilder,
-  EmbedBuilder,
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db, cookiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { refreshCookie, maskCookie } from "../roblox";
+import { refreshCookie } from "../roblox";
 
 export const refreshCookieCommand = new SlashCommandBuilder()
-  .setName("refresh-cookie")
-  .setDescription("Refresh a saved Roblox cookie to get a new valid one")
+  .setName("rcookie")
+  .setDescription("Re-session a cookie!")
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
     opt
       .setName("label")
-      .setDescription("The label of the cookie to refresh")
+      .setDescription("The label of the cookie to re-session")
       .setRequired(true),
   );
 
@@ -32,68 +31,56 @@ export async function handleRefreshCookie(
     .where(eq(cookiesTable.label, label));
 
   if (!row) {
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xff4444)
-          .setTitle("❌ Not Found")
-          .setDescription(`No cookie found with the label **${label}**.`),
-      ],
-    });
+    await interaction.editReply(`❌ No cookie found with label **${label}**.`);
     return;
   }
 
-  const { newCookie, status } = await refreshCookie(row.cookieValue);
+  // Try up to 2 times
+  let newCookie: string | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const result = await refreshCookie(row.cookieValue);
+    if (result.newCookie) {
+      newCookie = result.newCookie;
+      break;
+    }
+  }
 
-  if (newCookie) {
-    await db
-      .update(cookiesTable)
-      .set({
-        cookieValue: newCookie,
-        status: "active",
-        lastRefreshed: new Date(),
-      })
-      .where(eq(cookiesTable.id, row.id));
-
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x00ff88)
-          .setTitle("🔄 Cookie Refreshed")
-          .addFields(
-            { name: "Label", value: label, inline: true },
-            { name: "Status", value: status, inline: true },
-            {
-              name: "New Cookie (masked)",
-              value: `\`${maskCookie(newCookie)}\``,
-            },
-          )
-          .setTimestamp(),
-      ],
-    });
-  } else {
-    // Refresh failed — mark as invalid if it was active
+  if (!newCookie) {
+    // Mark as invalid if it was previously active
     if (row.status === "active") {
       await db
         .update(cookiesTable)
         .set({ status: "invalid" })
         .where(eq(cookiesTable.id, row.id));
     }
-
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xff4444)
-          .setTitle("❌ Refresh Failed")
-          .addFields(
-            { name: "Label", value: label, inline: true },
-            { name: "Error", value: status, inline: true },
-          )
-          .setDescription(
-            "The cookie could not be refreshed. It may have already expired or been invalidated.",
-          )
-          .setTimestamp(),
-      ],
-    });
+    await interaction.editReply("Failed");
+    return;
   }
+
+  // Save the refreshed cookie to the database
+  await db
+    .update(cookiesTable)
+    .set({
+      cookieValue: newCookie,
+      status: "active",
+      lastRefreshed: new Date(),
+    })
+    .where(eq(cookiesTable.id, row.id));
+
+  // Success — send the header, then two copy-friendly versions
+  await interaction.editReply(
+    `✅ **Cookie re-sessioned!** Label: \`${label}\``,
+  );
+
+  // Mobile copy — inline backtick, easy to long-press select on phone
+  await interaction.followUp({
+    content: `📱 **Mobile copy:**\n\`${newCookie}\``,
+    ephemeral: true,
+  });
+
+  // PC copy — code block, easy to click-copy on desktop
+  await interaction.followUp({
+    content: `💻 **PC copy:**\n\`\`\`\n${newCookie}\n\`\`\``,
+    ephemeral: true,
+  });
 }
