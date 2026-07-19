@@ -1,6 +1,4 @@
 import axios from 'axios';
-import { wrapper } from 'axios-cookiejar-support';
-import { CookieJar } from 'tough-cookie';
 
 export interface ValidateResult {
   valid: boolean;
@@ -10,45 +8,34 @@ export interface ValidateResult {
   debug: string;
 }
 
-/**
- * Validates a Roblox .ROBLOSECURITY cookie WITHOUT modifying the session.
- * Uses a plain GET request — no CSRF required, no side effects, cannot invalidate the cookie.
- */
 export async function validateCookie(cookie: string): Promise<ValidateResult> {
-  const lines: string[] = [];
-  const log = (msg: string) => lines.push(msg);
-
-  log(`📥 Cookie length: ${cookie.length}`);
-
+  const debug: string[] = [];
+  const log = (msg: string) => {
+    debug.push(msg);
+    console.log('[VALIDATE]', msg);
+  };
+  const trimmed = cookie.trim();
+  log(`Cookie length: ${trimmed.length}`);
   try {
-    log('📤 GET https://users.roblox.com/v1/users/authenticated …');
+    log('GET /users/authenticated');
     const resp = await axios.get('https://users.roblox.com/v1/users/authenticated', {
       headers: {
-        Cookie: `.ROBLOSECURITY=${cookie.trim()}`,
+        Cookie: `.ROBLOSECURITY=${trimmed}`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       validateStatus: () => true,
     });
-
-    log(`↩️  Status: ${resp.status}`);
-
+    log(`Status: ${resp.status}`);
     if (resp.status === 200) {
-      const { id, name, displayName } = resp.data as { id: number; name: string; displayName: string };
-      log(`✅ Authenticated as: ${name} (${displayName}) — ID ${id}`);
-      return { valid: true, username: name, displayName, userId: id, debug: lines.join('\n') };
+      const { id, name, displayName } = resp.data;
+      log(`User: ${name} (${displayName}) ID ${id}`);
+      return { valid: true, username: name, displayName, userId: id, debug: debug.join('\n') };
     }
-
-    if (resp.status === 401) {
-      log('❌ Cookie is invalid or expired (401 Unauthorized)');
-    } else {
-      log(`⚠️  Unexpected status ${resp.status}`);
-      log(`📄 Body: ${JSON.stringify(resp.data)}`);
-    }
-
-    return { valid: false, debug: lines.join('\n') };
+    if (resp.status === 401) log('Cookie invalid');
+    return { valid: false, debug: debug.join('\n') };
   } catch (err: any) {
-    log(`💥 Network error: ${err.message}`);
-    return { valid: false, debug: lines.join('\n') };
+    log(`Error: ${err.message}`);
+    return { valid: false, debug: debug.join('\n') };
   }
 }
 
@@ -58,108 +45,69 @@ export interface RefreshResult {
   debug: string;
 }
 
-/**
- * Refreshes a Roblox .ROBLOSECURITY cookie.
- *
- * Flow:
- *   1. POST /v2/logout WITHOUT a CSRF token
- *      → Roblox rejects with 403/401 but returns x-csrf-token in the header.
- *        The session is NOT invalidated because the request was rejected.
- *   2. POST /v2/logoutfromallsessionsandreauthenticate WITH that CSRF token
- *      → Roblox logs out all sessions and sets a brand-new .ROBLOSECURITY cookie.
- */
 export async function refreshCookie(cookie: string): Promise<RefreshResult> {
-  const lines: string[] = [];
-  const log = (msg: string) => lines.push(msg);
-
-  log(`📥 Cookie length: ${cookie.length}`);
-
-  const jar = new CookieJar();
-  await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}`, 'https://auth.roblox.com');
-  log('✅ Cookie set in jar');
-
-  const client = wrapper(
-    axios.create({
-      baseURL: 'https://auth.roblox.com',
-      jar,
-      withCredentials: true,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      validateStatus: () => true,
-    })
-  );
-
+  const debug: string[] = [];
+  const log = (msg: string) => {
+    debug.push(msg);
+    console.log('[REFRESH]', msg);
+  };
+  const trimmed = cookie.trim();
+  log(`Cookie length: ${trimmed.length}`);
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    Cookie: `.ROBLOSECURITY=${trimmed}`,
+  };
   try {
-    // STEP 1 — POST /v2/logout without CSRF to harvest the token
-    // Expected: 403 (or 401 if cookie is already expired) + x-csrf-token header
-    // The session is NOT logged out because the request is rejected by Roblox
-    log('📤 POST /v2/logout (no CSRF — expecting 403/401 + x-csrf-token)…');
-    const csrfResp = await client.post('/v2/logout');
-    log(`↩️  /v2/logout → status ${csrfResp.status}`);
-
+    log('POST /v2/logout');
+    const csrfResp = await axios.post(
+      'https://auth.roblox.com/v2/logout',
+      {},
+      { headers: baseHeaders, validateStatus: () => true }
+    );
+    log(`Status: ${csrfResp.status}`);
     const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
     if (!csrf) {
       if (csrfResp.status === 401) {
-        log('❌ Cookie is already expired or invalid — Roblox returned 401 with no CSRF token');
-        log('   (A valid session always returns x-csrf-token even on 403)');
-        return { newCookie: null, status: 'COOKIE_EXPIRED', debug: lines.join('\n') };
+        log('Cookie expired');
+        return { newCookie: null, status: 'COOKIE_EXPIRED', debug: debug.join('\n') };
       }
-      log(`❌ No x-csrf-token header (status ${csrfResp.status})`);
-      log(`📋 Response headers: ${JSON.stringify(csrfResp.headers)}`);
-      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: lines.join('\n') };
+      log(`No CSRF (status ${csrfResp.status})`);
+      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: debug.join('\n') };
     }
-    log(`🔑 CSRF obtained: ${csrf.slice(0, 20)}…`);
-
-    // STEP 2 — re-auth with CSRF; Roblox invalidates all sessions and issues a new cookie
-    log('📤 POST /v2/logoutfromallsessionsandreauthenticate (with CSRF)…');
-    const reauthResp = await client.post(
-      '/v2/logoutfromallsessionsandreauthenticate',
+    log(`CSRF: ${csrf.slice(0, 20)}…`);
+    log('POST /v2/session/refresh');
+    const refreshHeaders = { ...baseHeaders, 'X-CSRF-TOKEN': csrf };
+    const refreshResp = await axios.post(
+      'https://auth.roblox.com/v2/session/refresh',
       {},
-      { headers: { 'X-CSRF-TOKEN': csrf } }
+      { headers: refreshHeaders, validateStatus: () => true }
     );
-    log(`↩️  Re-auth → status ${reauthResp.status}`);
-
-    if (reauthResp.status === 200) {
-      const trimmed = cookie.trim();
-
-      // Try jar first — pick the cookie whose value differs from the original
-      const cookies = await jar.getCookies('https://auth.roblox.com');
-      log(`🍪 Jar has ${cookies.length} cookie(s)`);
-      const newFromJar = cookies
-        .filter(c => c.key === '.ROBLOSECURITY' && c.value !== trimmed)
-        .pop();
-
-      if (newFromJar) {
-        log(`✅ New cookie from jar: ${newFromJar.value.slice(0, 10)}…`);
-        return { newCookie: newFromJar.value, status: 'SUCCESS', debug: lines.join('\n') };
-      }
-
-      // Fallback — parse Set-Cookie headers directly
-      const setCookie = reauthResp.headers['set-cookie'];
-      log(`📋 Set-Cookie: ${JSON.stringify(setCookie)}`);
+    log(`Refresh status: ${refreshResp.status}`);
+    if (refreshResp.status === 200) {
+      const setCookie = refreshResp.headers['set-cookie'];
+      log(`Set-Cookie: ${JSON.stringify(setCookie)}`);
+      let newCookie: string | null = null;
       if (Array.isArray(setCookie)) {
         for (const raw of setCookie) {
           const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
           if (match && match[1] !== trimmed) {
-            log(`✅ New cookie from Set-Cookie header: ${match[1].slice(0, 10)}…`);
-            return { newCookie: match[1], status: 'SUCCESS', debug: lines.join('\n') };
+            newCookie = match[1];
+            break;
           }
         }
       }
-
-      log('⚠️  Re-auth returned 200 but no new .ROBLOSECURITY found');
-      return { newCookie: null, status: 'SUCCESS_NO_COOKIE', debug: lines.join('\n') };
+      if (newCookie) {
+        log(`New cookie: ${newCookie.slice(0, 10)}…`);
+        return { newCookie, status: 'SUCCESS', debug: debug.join('\n') };
+      }
+      log('No new cookie found');
+      return { newCookie: null, status: 'SUCCESS_NO_COOKIE', debug: debug.join('\n') };
     }
-
-    log(`❌ Re-auth failed with status ${reauthResp.status}`);
-    if (reauthResp.data) {
-      log(`📄 Response body: ${JSON.stringify(reauthResp.data)}`);
-    }
-    return { newCookie: null, status: `ERROR_${reauthResp.status}`, debug: lines.join('\n') };
+    log(`Refresh failed (${refreshResp.status})`);
+    return { newCookie: null, status: `ERROR_${refreshResp.status}`, debug: debug.join('\n') };
   } catch (err: any) {
-    log(`💥 Network error: ${err.message}`);
-    return { newCookie: null, status: `NETWORK_ERROR_${err.message}`, debug: lines.join('\n') };
+    log(`Network error: ${err.message}`);
+    return { newCookie: null, status: `NETWORK_ERROR_${err.message}`, debug: debug.join('\n') };
   }
 }
