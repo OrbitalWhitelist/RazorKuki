@@ -101,6 +101,11 @@ export async function refreshCookie(cookie: string): Promise<RefreshResult> {
 
     const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
     if (!csrf) {
+      if (csrfResp.status === 401) {
+        log('❌ Cookie is already expired or invalid — Roblox returned 401 with no CSRF token');
+        log('   (A valid session always returns x-csrf-token even on 403)');
+        return { newCookie: null, status: 'COOKIE_EXPIRED', debug: lines.join('\n') };
+      }
       log(`❌ No x-csrf-token header (status ${csrfResp.status})`);
       log(`📋 Response headers: ${JSON.stringify(csrfResp.headers)}`);
       return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: lines.join('\n') };
