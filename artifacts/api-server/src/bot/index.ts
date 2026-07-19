@@ -85,8 +85,7 @@ export async function startBot(): Promise<void> {
     if (!interaction.isChatInputCommand()) return;
 
     // ── SECURITY LAYER ────────────────────────────────────────────────────────
-    // Block every interaction that is NOT from the whitelisted guild.
-    // This covers: DMs (guildId === null), other servers, test servers.
+    // 1. Guild whitelist — block DMs, other servers, test servers.
     if (interaction.guildId !== allowedGuildId) {
       await interaction.reply({
         content:
@@ -99,7 +98,26 @@ export async function startBot(): Promise<void> {
           userId: interaction.user.id,
           command: interaction.commandName,
         },
-        "Blocked unauthorized interaction",
+        "Blocked unauthorized guild interaction",
+      );
+      return;
+    }
+
+    // 2. Owner whitelist — if OWNER_IDS is set, only those user IDs may run commands.
+    //    Set OWNER_IDS as a comma-separated list of Discord user IDs, e.g. "123456,789012"
+    const ownerIds = (process.env["OWNER_IDS"] ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (ownerIds.length > 0 && !ownerIds.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: "⛔ You are not authorized to use Razor Tools.",
+        ephemeral: true,
+      });
+      logger.warn(
+        { userId: interaction.user.id, command: interaction.commandName },
+        "Blocked unauthorized user interaction",
       );
       return;
     }

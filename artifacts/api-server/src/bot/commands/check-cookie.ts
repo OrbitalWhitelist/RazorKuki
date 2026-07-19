@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db, cookiesTable } from "@workspace/db";
@@ -10,6 +11,7 @@ import { checkCookie } from "../roblox";
 export const checkCookieCommand = new SlashCommandBuilder()
   .setName("check-cookie")
   .setDescription("Check whether a saved cookie is still valid")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
     opt
       .setName("label")

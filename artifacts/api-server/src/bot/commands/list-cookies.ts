@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db, cookiesTable } from "@workspace/db";
@@ -8,7 +9,8 @@ import { maskCookie } from "../roblox";
 
 export const listCookiesCommand = new SlashCommandBuilder()
   .setName("list-cookies")
-  .setDescription("List all saved Roblox cookies");
+  .setDescription("List all saved Roblox cookies")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 const STATUS_EMOJI: Record<string, string> = {
   active: "🟢",

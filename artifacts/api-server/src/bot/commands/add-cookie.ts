@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db, cookiesTable } from "@workspace/db";
@@ -9,6 +10,7 @@ import { eq } from "drizzle-orm";
 export const addCookieCommand = new SlashCommandBuilder()
   .setName("add-cookie")
   .setDescription("Save a new Roblox cookie")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
     opt
       .setName("label")

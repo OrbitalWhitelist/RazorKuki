@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
   type Client,
 } from "discord.js";
@@ -9,7 +10,8 @@ import { sql } from "drizzle-orm";
 
 export const testCommand = new SlashCommandBuilder()
   .setName("test")
-  .setDescription("Run a system health check on Razor Tools");
+  .setDescription("Run a system health check on Razor Tools")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export function createTestHandler(client: Client) {
   return async function handleTest(

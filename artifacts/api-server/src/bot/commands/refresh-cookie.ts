@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db, cookiesTable } from "@workspace/db";
@@ -10,6 +11,7 @@ import { refreshCookie, maskCookie } from "../roblox";
 export const refreshCookieCommand = new SlashCommandBuilder()
   .setName("refresh-cookie")
   .setDescription("Refresh a saved Roblox cookie to get a new valid one")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
     opt
       .setName("label")
