@@ -5,20 +5,18 @@ import { CookieJar } from 'tough-cookie';
 export interface RefreshResult {
   newCookie: string | null;
   status: string;
-  debug: string; // single merged string, not an array
+  debug: string;
 }
 
 /**
  * Refreshes a Roblox .ROBLOSECURITY cookie.
  *
  * Flow:
- *   1. POST /v2/logoutfromallsessionsandreauthenticate WITHOUT a CSRF token
- *      → Roblox returns 403 + x-csrf-token header (session stays alive)
- *   2. POST the same endpoint again WITH the token
- *      → Roblox invalidates all sessions and sets a brand-new .ROBLOSECURITY cookie
- *
- * We never call /v2/logout — that endpoint actually logs the account out,
- * killing the cookie before Step 2 can use it.
+ *   1. POST /v2/logout WITHOUT a CSRF token
+ *      → Roblox rejects with 403/401 but returns x-csrf-token in the header.
+ *        The session is NOT invalidated because the request was rejected.
+ *   2. POST /v2/logoutfromallsessionsandreauthenticate WITH that CSRF token
+ *      → Roblox logs out all sessions and sets a brand-new .ROBLOSECURITY cookie.
  */
 export async function refreshCookie(cookie: string): Promise<RefreshResult> {
   const lines: string[] = [];
@@ -39,26 +37,27 @@ export async function refreshCookie(cookie: string): Promise<RefreshResult> {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      validateStatus: () => true,  // don't throw on 4xx/5xx
+      validateStatus: () => true,
     })
   );
 
   try {
-    // STEP 1 — hit the reauth endpoint without CSRF to harvest the token
-    // Roblox will return 403 + x-csrf-token; the session/cookie is still valid
-    log('📤 POST /v2/logoutfromallsessionsandreauthenticate (no CSRF, expecting 403)…');
-    const csrfResp = await client.post('/v2/logoutfromallsessionsandreauthenticate', {});
-    log(`↩️  Status: ${csrfResp.status}`);
+    // STEP 1 — POST /v2/logout without CSRF to harvest the token
+    // Expected: 403 (or 401 if cookie is already expired) + x-csrf-token header
+    // The session is NOT logged out because the request is rejected by Roblox
+    log('📤 POST /v2/logout (no CSRF — expecting 403/401 + x-csrf-token)…');
+    const csrfResp = await client.post('/v2/logout');
+    log(`↩️  /v2/logout → status ${csrfResp.status}`);
 
     const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
     if (!csrf) {
-      log(`❌ No CSRF token in response (status ${csrfResp.status})`);
-      log(`📋 Headers: ${JSON.stringify(csrfResp.headers)}`);
+      log(`❌ No x-csrf-token header (status ${csrfResp.status})`);
+      log(`📋 Response headers: ${JSON.stringify(csrfResp.headers)}`);
       return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: lines.join('\n') };
     }
     log(`🔑 CSRF obtained: ${csrf.slice(0, 20)}…`);
 
-    // STEP 2 — re-auth with CSRF; Roblox logs out all sessions and issues a new cookie
+    // STEP 2 — re-auth with CSRF; Roblox invalidates all sessions and issues a new cookie
     log('📤 POST /v2/logoutfromallsessionsandreauthenticate (with CSRF)…');
     const reauthResp = await client.post(
       '/v2/logoutfromallsessionsandreauthenticate',
@@ -82,7 +81,7 @@ export async function refreshCookie(cookie: string): Promise<RefreshResult> {
         return { newCookie: newFromJar.value, status: 'SUCCESS', debug: lines.join('\n') };
       }
 
-      // Fallback: parse Set-Cookie headers directly
+      // Fallback — parse Set-Cookie headers directly
       const setCookie = reauthResp.headers['set-cookie'];
       log(`📋 Set-Cookie: ${JSON.stringify(setCookie)}`);
       if (Array.isArray(setCookie)) {

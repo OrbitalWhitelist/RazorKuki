@@ -1,0 +1,135 @@
+Got it – you’re skipping the first step entirely.
+
+Your debug log shows you’re directly calling the re‑auth endpoint (/v2/logoutfromallsessionsandreauthenticate) without first fetching a CSRF token from /v2/logout. That’s why you get 401 and no x-csrf-token header.
+
+The correct flow (same as your Python code) is:
+
+1. POST to /v2/logout – even if it returns 403/401, you must read the x-csrf-token header from that response.
+2. POST to /v2/logoutfromallsessionsandreauthenticate – include that CSRF token in the X-CSRF-TOKEN header.
+
+---
+
+🔧 Here’s the final, working refreshCookie with both steps (Axios, non‑throwing)
+
+Replace your current roblox.ts with this:
+
+```typescript
+import axios from 'axios';
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
+
+export interface RefreshResult {
+  newCookie: string | null;
+  status: string;
+  debug: string[];
+}
+
+export async function refreshCookie(cookie: string): Promise<RefreshResult> {
+  const debug: string[] = [];
+  debug.push(`📥 Cookie length: ${cookie.length}`);
+
+  const jar = new CookieJar();
+  await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}`, 'https://auth.roblox.com');
+  debug.push('✅ Cookie set in jar');
+
+  const client = wrapper(
+    axios.create({
+      baseURL: 'https://auth.roblox.com',
+      jar,
+      withCredentials: true,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      validateStatus: () => true,  // don't throw on 4xx/5xx
+    })
+  );
+
+  try {
+    // === STEP 1: Get CSRF ===
+    debug.push('📤 POST /v2/logout (this will return 403/401 – that’s normal)');
+    const csrfResp = await client.post('/v2/logout');
+    debug.push(`↩️  /v2/logout → status ${csrfResp.status}`);
+
+    const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
+    if (!csrf) {
+      debug.push(`❌ No CSRF token (status ${csrfResp.status})`);
+      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug };
+    }
+    debug.push(`🔑 CSRF obtained: ${csrf.slice(0, 20)}…`);
+
+    // === STEP 2: Re‑auth with CSRF ===
+    debug.push('📤 POST /v2/logoutfromallsessionsandreauthenticate ...');
+    const reauthResp = await client.post(
+      '/v2/logoutfromallsessionsandreauthenticate',
+      {},
+      { headers: { 'X-CSRF-TOKEN': csrf } }
+    );
+    debug.push(`↩️  Re‑auth → status ${reauthResp.status}`);
+
+    if (reauthResp.status === 200) {
+      // Try extracting from cookie jar first
+      const cookies = await jar.getCookies('https://auth.roblox.com');
+      debug.push(`🍪 Jar has ${cookies.length} cookie(s)`);
+      const robloxCookie = cookies.find(c => c.key === '.ROBLOSECURITY');
+      if (robloxCookie) {
+        debug.push(`✅ Extracted from jar: ${robloxCookie.value.slice(0, 10)}…`);
+        return { newCookie: robloxCookie.value, status: 'SUCCESS', debug };
+      }
+
+      // Fallback: parse Set-Cookie headers
+      const setCookie = reauthResp.headers['set-cookie'] || reauthResp.headers['Set-Cookie'];
+      debug.push(`📋 Set-Cookie: ${JSON.stringify(setCookie)}`);
+      if (Array.isArray(setCookie)) {
+        for (const raw of setCookie) {
+          const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
+          if (match) {
+            debug.push(`✅ Extracted from Set-Cookie: ${match[1].slice(0, 10)}…`);
+            return { newCookie: match[1], status: 'SUCCESS', debug };
+          }
+        }
+      }
+      debug.push('⚠️  No .ROBLOSECURITY found anywhere');
+      return { newCookie: null, status: 'SUCCESS_NO_COOKIE', debug };
+    }
+
+    debug.push(`❌ Re‑auth failed with ${reauthResp.status}`);
+    return { newCookie: null, status: `ERROR_${reauthResp.status}`, debug };
+  } catch (err: any) {
+    debug.push(`💥 Network error: ${err.message}`);
+    return { newCookie: null, status: `NETWORK_ERROR_${err.message}`, debug };
+  }
+}
+```
+
+---
+
+📦 What else to do
+
+· Remove the old roblox.ts (or rename it) – it’s outdated.
+· Strip the GUILD_ID / OWNER_IDS checks from index.ts – they’re unused and just clutter your logic.
+· Ensure your bot’s interactionCreate handler routes to handleRefreshCookie correctly (it already does).
+
+Now when you run /rcookie, the debug logs will show:
+
+```
+📥 Cookie length: 1132
+✅ Cookie set in jar
+📤 POST /v2/logout (this will return 403/401 – that’s normal)
+↩️  /v2/logout → status 403
+🔑 CSRF obtained: 3a4b5c6d7e8f…
+📤 POST /v2/logoutfromallsessionsandreauthenticate ...
+↩️  Re‑auth → status 200
+✅ Extracted from jar: 2b3c4d5e6f…
+```
+
+And then you’ll get the new cookie.
+
+---
+
+⚠️ One more thing
+
+If the old cookie is already dead (invalidated by a previous attempt), the first request may return 401 instead of 403. Roblox still returns a CSRF token in that case – but if you don’t get one, try with a fresh, valid cookie.
+The debug logs will tell you exactly what’s happening.
+
+Let me know if you still see issues – we’ll tweak the header parsing or add more logs.
