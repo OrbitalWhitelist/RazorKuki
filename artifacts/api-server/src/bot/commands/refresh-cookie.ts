@@ -8,7 +8,7 @@ import {
   type MessageComponentInteraction,
 } from 'discord.js';
 import { refreshCookie, killSessions } from '../roblox';
-import { successHeader, errorHeader, warnLine, ansiBlock } from '../ui';
+import { successEmbed, errorEmbed, warnEmbed } from '../ui';
 import type { Command } from './types';
 
 // ─── In-memory cookie store (10-min TTL) ──────────────────────────────────
@@ -42,7 +42,10 @@ export async function handleButtonInteraction(interaction: MessageComponentInter
 
   const entry = cookieStore.get(match[1]);
   if (!entry) {
-    await interaction.reply({ content: errorHeader('Cookie Expired', 'Run the command again.'), ephemeral: true });
+    await interaction.reply({
+      embeds: [errorEmbed('Cookie Expired', 'Run the command again — stored cookies expire after 10 minutes.')],
+      ephemeral: true,
+    });
     return;
   }
 
@@ -53,7 +56,7 @@ export async function handleButtonInteraction(interaction: MessageComponentInter
   }
 }
 
-// ─── Command definition ────────────────────────────────────────────────────
+// ─── Command ───────────────────────────────────────────────────────────────
 
 const data = new SlashCommandBuilder()
   .setName('rcookie')
@@ -70,7 +73,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
   const oldCookie = interaction.options.getString('cookie', true).trim();
 
-  // ── Step 1: Soft-refresh to obtain a new session token ──────────────────
+  // ── Step 1: Soft-refresh → obtain new session token ─────────────────────
   let newCookie: string | null = null;
   let refreshDebug = '';
 
@@ -78,29 +81,40 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const r = await refreshCookie(oldCookie);
     refreshDebug = r.debug;
     if (r.newCookie) { newCookie = r.newCookie; break; }
-    if (r.status === 'COOKIE_EXPIRED') break; // no point retrying
+    if (r.status === 'COOKIE_EXPIRED') break;
   }
 
   if (!newCookie) {
-    await interaction.editReply(
-      errorHeader('Re-session Failed', 'The cookie may be expired or the refresh endpoint rejected it.') +
-      `\n\`\`\`\n${refreshDebug}\n\`\`\``,
-    );
+    await interaction.editReply({
+      embeds: [errorEmbed('Re-session Failed', `Cookie may be expired or the refresh endpoint rejected it.\n\`\`\`\n${refreshDebug}\n\`\`\``)],
+    });
     return;
   }
 
-  // ── Step 2: Kill all sessions on the OLD cookie ──────────────────────────
+  // ── Step 2: Kill old sessions using the OLD cookie ───────────────────────
+  //
+  // After a soft-refresh, the old token is often already invalidated by Roblox.
+  // A COOKIE_EXPIRED (401) response on the kill step means the old cookie is
+  // already dead — that is the desired outcome, not a failure.
+  //
   const killResult = await killSessions(oldCookie);
-  const killOk = killResult.status === 'SUCCESS';
+  const killOk = killResult.status === 'SUCCESS' || killResult.status === 'COOKIE_EXPIRED';
 
-  const subtitle = killOk
-    ? 'Old sessions killed. Use the buttons to copy your new cookie.'
-    : 'Could not kill old sessions — but new cookie is ready.';
-
-  const content = successHeader('Cookie Re-Sessioned', subtitle) +
-    (killOk ? '' : '\n' + warnLine(`Kill status: ${killResult.status}`));
-
-  await interaction.editReply({ content, components: [storeAndBuildRow(newCookie)] });
+  if (killOk) {
+    await interaction.editReply({
+      embeds: [successEmbed('Cookie Re-Sessioned', 'Old sessions have been cleared. Use the buttons below to copy your new cookie.')],
+      components: [storeAndBuildRow(newCookie)],
+    });
+  } else {
+    // Real failure (network error, unexpected status) — still give the new cookie but warn
+    await interaction.editReply({
+      embeds: [
+        warnEmbed('Cookie Refreshed — Sessions May Still Be Active',
+          `Got a new cookie but couldn't confirm old sessions were killed.\nKill status: \`${killResult.status}\`\n\nThe new cookie is still valid — use the buttons to copy it.`),
+      ],
+      components: [storeAndBuildRow(newCookie)],
+    });
+  }
 }
 
 export const rcookieCommand: Command = { data, execute, handleButton: handleButtonInteraction };

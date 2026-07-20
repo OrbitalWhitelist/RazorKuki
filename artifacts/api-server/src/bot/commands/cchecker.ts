@@ -5,7 +5,7 @@ import {
 } from 'discord.js';
 import axios from 'axios';
 import { validateCookie } from '../roblox';
-import { buildAccountCard, successHeader, errorHeader, ansiBlock } from '../ui';
+import { buildAccountEmbed, successEmbed, errorEmbed, infoEmbed } from '../ui';
 import { storeAndBuildRow } from './refresh-cookie';
 import type { Command } from './types';
 
@@ -38,7 +38,7 @@ function extractCookies(text: string): string[] {
   return result;
 }
 
-// ─── Command definition ────────────────────────────────────────────────────
+// ─── Command ───────────────────────────────────────────────────────────────
 
 const data = new SlashCommandBuilder()
   .setName('cchecker')
@@ -56,7 +56,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   const attachment = interaction.options.getAttachment('file', true);
 
   if (!attachment.name?.endsWith('.txt') && !attachment.contentType?.includes('text')) {
-    await interaction.editReply(errorHeader('Wrong File Type', 'Please attach a .txt file.'));
+    await interaction.editReply({ embeds: [errorEmbed('Wrong File Type', 'Please attach a `.txt` file.')] });
     return;
   }
 
@@ -65,22 +65,22 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const resp = await axios.get<string>(attachment.url, { responseType: 'text', validateStatus: () => true });
     fileContent = resp.data;
   } catch (err: any) {
-    await interaction.editReply(errorHeader('Download Failed', err.message));
+    await interaction.editReply({ embeds: [errorEmbed('Download Failed', err.message)] });
     return;
   }
 
   const cookies = extractCookies(fileContent);
 
   if (cookies.length === 0) {
-    await interaction.editReply(
-      errorHeader('No Cookies Found', 'File must contain _|WARNING...|_CAEQ… or bare CAEQ… tokens.'),
-    );
+    await interaction.editReply({
+      embeds: [errorEmbed('No Cookies Found', 'File must contain `_|WARNING...|_CAEQ…` or bare `CAEQ…` tokens.')],
+    });
     return;
   }
 
-  await interaction.editReply(
-    ansiBlock(`\x1B[1;36m🔍  Scanning ${cookies.length} cookie(s)…\x1B[0m`),
-  );
+  await interaction.editReply({
+    embeds: [infoEmbed(`🔍 Scanning ${cookies.length} cookie(s)…`)],
+  });
 
   let validCount = 0;
 
@@ -92,17 +92,20 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const row = storeAndBuildRow(cookie);
 
     await interaction.followUp({
-      content: successHeader(`Valid Cookie #${validCount}`) + '\n' + buildAccountCard(result),
+      embeds: [
+        successEmbed(`Valid Cookie #${validCount}`),
+        buildAccountEmbed(result),
+      ],
       components: [row],
       ephemeral: true,
     });
   }
 
-  const summaryContent = validCount === 0
-    ? errorHeader('No Valid Cookies', `Checked all ${cookies.length} — none were valid.`)
-    : successHeader('Scan Complete', `${validCount} valid / ${cookies.length} total`);
+  const summaryEmbed = validCount === 0
+    ? errorEmbed('No Valid Cookies', `Checked all ${cookies.length} — none were valid.`)
+    : successEmbed('Scan Complete', `**${validCount} valid** out of ${cookies.length} checked.`);
 
-  await interaction.followUp({ content: summaryContent, ephemeral: true });
+  await interaction.followUp({ embeds: [summaryEmbed], ephemeral: true });
 }
 
 export const ccheckerCommand: Command = { data, execute };

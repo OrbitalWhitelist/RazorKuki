@@ -4,7 +4,7 @@ import {
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import { validateCookie } from '../roblox';
-import { buildAccountCard, successHeader, errorHeader } from '../ui';
+import { buildAccountEmbed, successEmbed, errorEmbed } from '../ui';
 import type { Command } from './types';
 
 const data = new SlashCommandBuilder()
@@ -24,13 +24,16 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   const result = await validateCookie(cookie);
 
   if (result.valid) {
-    await interaction.editReply(
-      successHeader('Cookie Valid') + '\n' + buildAccountCard(result),
-    );
+    await interaction.editReply({
+      embeds: [
+        successEmbed('Cookie Valid'),
+        buildAccountEmbed(result),
+      ],
+    });
   } else {
-    await interaction.editReply(
-      errorHeader('Cookie Invalid or Expired', result.debug),
-    );
+    await interaction.editReply({
+      embeds: [errorEmbed('Cookie Invalid or Expired', `\`\`\`\n${result.debug}\n\`\`\``)],
+    });
   }
 }
 

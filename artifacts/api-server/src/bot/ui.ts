@@ -1,31 +1,18 @@
+import { EmbedBuilder } from 'discord.js';
 import type { ValidateResult } from './roblox';
 
-// ─── ANSI escape helpers ───────────────────────────────────────────────────
-const R  = '\x1B[0m';
-const B  = '\x1B[1m';
-const DM = '\x1B[2m';
+// ─── Brand colours ─────────────────────────────────────────────────────────
+export const COLOR = {
+  green:  0x57F287,
+  red:    0xED4245,
+  yellow: 0xFEE75C,
+  blue:   0x5865F2,
+  blurple: 0x5865F2,
+} as const;
 
-const cRed    = '\x1B[31m';
-const cGreen  = '\x1B[32m';
-const cYellow = '\x1B[33m';
-const cBlue   = '\x1B[34m';
-const cCyan   = '\x1B[36m';
-const cWhite  = '\x1B[37m';
+const FOOTER = { text: '⚔ Razor Tools' };
 
-const boldCyan   = (s: string) => `${B}${cCyan}${s}${R}`;
-const boldBlue   = (s: string) => `${B}${cBlue}${s}${R}`;
-const boldGreen  = (s: string) => `${B}${cGreen}${s}${R}`;
-const boldRed    = (s: string) => `${B}${cRed}${s}${R}`;
-const boldYellow = (s: string) => `${B}${cYellow}${s}${R}`;
-const dimWhite   = (s: string) => `${DM}${cWhite}${s}${R}`;
-const dimCyan    = (s: string) => `${DM}${cCyan}${s}${R}`;
-
-/** Wraps a string in a Discord ANSI code block */
-export function ansiBlock(content: string): string {
-  return `\`\`\`ansi\n${content}\n\`\`\``;
-}
-
-/** Formats an account age in days to a human-readable string */
+// ─── Account age formatter ─────────────────────────────────────────────────
 export function formatAccountAge(days: number): string {
   const years  = Math.floor(days / 365);
   const months = Math.floor((days % 365) / 30);
@@ -37,65 +24,52 @@ export function formatAccountAge(days: number): string {
   return `${days}d — ${parts.join(' ')}`;
 }
 
-/** Renders a yes/no boolean with colour */
-function colorBool(val: boolean | undefined): string {
-  if (val == null) return dimWhite('Unknown');
-  return val ? boldGreen('Yes') : dimWhite('No');
-}
-
-/** Right-pads a label to keep value columns aligned */
-function lbl(s: string): string {
-  return dimWhite(s.padEnd(11));
-}
-
-// ─── Divider line ─────────────────────────────────────────────────────────
-const DIV = dimCyan('─────────────────────────────');
+// ─── Account embed ─────────────────────────────────────────────────────────
 
 /**
- * Builds the ANSI account info card for a valid cookie result.
+ * Builds a rich account info embed from a ValidateResult.
+ * Fields: Robux | Age | Premium  (Headless/Korblox removed)
  */
-export function buildAccountCard(r: ValidateResult): string {
-  const robuxStr = r.robux != null ? boldYellow(String(r.robux)) : dimWhite('?');
-  const ageStr   = r.accountAgeDays != null
-    ? boldBlue(formatAccountAge(r.accountAgeDays))
-    : dimWhite('?');
+export function buildAccountEmbed(r: ValidateResult): EmbedBuilder {
+  const ageStr     = r.accountAgeDays != null ? formatAccountAge(r.accountAgeDays) : '?';
+  const robuxStr   = r.robux    != null ? `${r.robux.toLocaleString()}` : '?';
+  const premiumStr = r.isPremium == null ? '?' : r.isPremium ? 'Yes ✓' : 'No';
 
-  const lines = [
-    boldCyan('⚔  RAZOR TOOLS') + '  ' + dimWhite('— Account Info'),
-    DIV,
-    boldBlue(r.username ?? '?') + '  ' + dimWhite(`(${r.displayName ?? '?'})`),
-    dimWhite('ID  ') + dimWhite(String(r.userId ?? '?')),
-    '',
-    lbl('Robux')    + robuxStr,
-    lbl('Age')      + ageStr,
-    lbl('Premium')  + colorBool(r.isPremium),
-    lbl('Headless') + colorBool(r.hasHeadless),
-    lbl('Korblox')  + colorBool(r.hasKorblox),
-    DIV,
-  ];
-
-  return ansiBlock(lines.join('\n'));
+  return new EmbedBuilder()
+    .setColor(COLOR.blue)
+    .setTitle(`${r.username ?? 'Unknown'} (${r.displayName ?? '?'})`)
+    .setDescription(`ID: \`${r.userId ?? '?'}\``)
+    .addFields(
+      { name: 'Robux',   value: robuxStr,   inline: true },
+      { name: 'Age',     value: ageStr,     inline: true },
+      { name: 'Premium', value: premiumStr, inline: true },
+    )
+    .setFooter(FOOTER)
+    .setTimestamp();
 }
 
-/**
- * Builds a success header line (green tick, bold title, optional subtitle).
- */
-export function successHeader(title: string, subtitle?: string): string {
-  const sub = subtitle ? `\n${dimWhite(subtitle)}` : '';
-  return ansiBlock(boldGreen(`✓  ${title}`) + sub);
+// ─── Status embeds ─────────────────────────────────────────────────────────
+
+export function successEmbed(title: string, description?: string): EmbedBuilder {
+  const e = new EmbedBuilder().setColor(COLOR.green).setTitle(`✅ ${title}`).setFooter(FOOTER).setTimestamp();
+  if (description) e.setDescription(description);
+  return e;
 }
 
-/**
- * Builds an error header line (red cross, bold title, optional detail).
- */
-export function errorHeader(title: string, detail?: string): string {
-  const det = detail ? `\n${dimWhite(detail)}` : '';
-  return ansiBlock(boldRed(`✗  ${title}`) + det);
+export function errorEmbed(title: string, description?: string): EmbedBuilder {
+  const e = new EmbedBuilder().setColor(COLOR.red).setTitle(`❌ ${title}`).setFooter(FOOTER).setTimestamp();
+  if (description) e.setDescription(description);
+  return e;
 }
 
-/**
- * Builds a warning/info line (yellow, no ansi block — inline use).
- */
-export function warnLine(msg: string): string {
-  return ansiBlock(`${B}${cYellow}⚠  ${msg}${R}`);
+export function warnEmbed(title: string, description?: string): EmbedBuilder {
+  const e = new EmbedBuilder().setColor(COLOR.yellow).setTitle(`⚠️ ${title}`).setFooter(FOOTER).setTimestamp();
+  if (description) e.setDescription(description);
+  return e;
+}
+
+export function infoEmbed(title: string, description?: string): EmbedBuilder {
+  const e = new EmbedBuilder().setColor(COLOR.blurple).setTitle(title).setFooter(FOOTER).setTimestamp();
+  if (description) e.setDescription(description);
+  return e;
 }
