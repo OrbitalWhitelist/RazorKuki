@@ -7,7 +7,7 @@ import {
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
 } from 'discord.js';
-import { refreshCookie, type RefreshResult } from '../roblox';
+import { resetCookie, type RefreshResult } from '../roblox';
 
 const cookieStore = new Map<string, { cookie: string; timestamp: number }>();
 
@@ -18,28 +18,21 @@ setInterval(() => {
   }
 }, 60_000);
 
-function storeAndBuildRow(cookie: string): { id: string; row: ActionRowBuilder<ButtonBuilder> } {
+export function storeAndBuildRow(cookie: string): ActionRowBuilder<ButtonBuilder> {
   const id = Math.random().toString(36).substring(2, 10);
   cookieStore.set(id, { cookie, timestamp: Date.now() });
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`cookie_mobile_${id}`)
-      .setLabel('📱 Mobile Copy')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`cookie_pc_${id}`)
-      .setLabel('💻 PC Copy')
-      .setStyle(ButtonStyle.Secondary),
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`cookie_mobile_${id}`).setLabel('📱 Mobile Copy').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`cookie_pc_${id}`).setLabel('💻 PC Copy').setStyle(ButtonStyle.Secondary),
   );
-  return { id, row };
 }
 
 export const refreshCookieCommand = new SlashCommandBuilder()
   .setName('rcookie')
-  .setDescription('Re-session a Roblox cookie')
+  .setDescription('Re-session a Roblox cookie (kills all other sessions)')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
-    opt.setName('cookie').setDescription('The full .ROBLOSECURITY cookie').setRequired(true),
+    opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie (full or bare CAEQ... value)').setRequired(true),
   );
 
 export async function handleRefreshCookie(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -49,20 +42,20 @@ export async function handleRefreshCookie(interaction: ChatInputCommandInteracti
 
   let result: RefreshResult | null = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    result = await refreshCookie(cookie);
+    result = await resetCookie(cookie);
     if (result.newCookie) break;
   }
 
   if (!result?.newCookie) {
     const status = result?.status ?? 'unknown';
     const debugBlock = result?.debug ? `\n\`\`\`\n${result.debug}\n\`\`\`` : '';
-    await interaction.editReply(`❌ **Refresh failed** — \`${status}\`${debugBlock}`);
+    await interaction.editReply(`❌ **Re-session failed** — \`${status}\`${debugBlock}`);
     return;
   }
 
-  const { row } = storeAndBuildRow(result.newCookie);
+  const row = storeAndBuildRow(result.newCookie);
   await interaction.editReply({
-    content: '✅ **Cookie re-sessioned!** Use the buttons to copy it.',
+    content: '✅ **Cookie re-sessioned!** All other sessions have been killed. Use the buttons to copy the new cookie.',
     components: [row],
   });
 }
@@ -71,7 +64,7 @@ export async function handleButtonInteraction(interaction: MessageComponentInter
   const { customId } = interaction;
   const mobileMatch = customId.match(/^cookie_mobile_(.+)$/);
   const pcMatch = customId.match(/^cookie_pc_(.+)$/);
-  const match = mobileMatch || pcMatch;
+  const match = mobileMatch ?? pcMatch;
   if (!match) return;
 
   const entry = cookieStore.get(match[1]);
@@ -80,10 +73,9 @@ export async function handleButtonInteraction(interaction: MessageComponentInter
     return;
   }
 
-  const cookie = entry.cookie;
   if (mobileMatch) {
-    await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
+    await interaction.reply({ content: `\`${entry.cookie}\``, ephemeral: true });
   } else {
-    await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
+    await interaction.reply({ content: `\`\`\`\n${entry.cookie}\n\`\`\``, ephemeral: true });
   }
 }

