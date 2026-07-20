@@ -7,7 +7,11 @@ import {
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
 } from 'discord.js';
-import { resetCookie, type RefreshResult } from '../roblox';
+import { refreshCookie, killSessions } from '../roblox';
+import { successHeader, errorHeader, warnLine, ansiBlock } from '../ui';
+import type { Command } from './types';
+
+// ─── In-memory cookie store (10-min TTL) ──────────────────────────────────
 
 const cookieStore = new Map<string, { cookie: string; timestamp: number }>();
 
@@ -18,6 +22,8 @@ setInterval(() => {
   }
 }, 60_000);
 
+// ─── Shared helpers ────────────────────────────────────────────────────────
+
 export function storeAndBuildRow(cookie: string): ActionRowBuilder<ButtonBuilder> {
   const id = Math.random().toString(36).substring(2, 10);
   cookieStore.set(id, { cookie, timestamp: Date.now() });
@@ -27,49 +33,16 @@ export function storeAndBuildRow(cookie: string): ActionRowBuilder<ButtonBuilder
   );
 }
 
-export const refreshCookieCommand = new SlashCommandBuilder()
-  .setName('rcookie')
-  .setDescription('Re-session a Roblox cookie (kills all other sessions)')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addStringOption(opt =>
-    opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie (full or bare CAEQ... value)').setRequired(true),
-  );
-
-export async function handleRefreshCookie(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
-
-  const cookie = interaction.options.getString('cookie', true).trim();
-
-  let result: RefreshResult | null = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    result = await resetCookie(cookie);
-    if (result.newCookie) break;
-  }
-
-  if (!result?.newCookie) {
-    const status = result?.status ?? 'unknown';
-    const debugBlock = result?.debug ? `\n\`\`\`\n${result.debug}\n\`\`\`` : '';
-    await interaction.editReply(`❌ **Re-session failed** — \`${status}\`${debugBlock}`);
-    return;
-  }
-
-  const row = storeAndBuildRow(result.newCookie);
-  await interaction.editReply({
-    content: '✅ **Cookie re-sessioned!** All other sessions have been killed. Use the buttons to copy the new cookie.',
-    components: [row],
-  });
-}
-
 export async function handleButtonInteraction(interaction: MessageComponentInteraction): Promise<void> {
   const { customId } = interaction;
   const mobileMatch = customId.match(/^cookie_mobile_(.+)$/);
-  const pcMatch = customId.match(/^cookie_pc_(.+)$/);
-  const match = mobileMatch ?? pcMatch;
+  const pcMatch     = customId.match(/^cookie_pc_(.+)$/);
+  const match       = mobileMatch ?? pcMatch;
   if (!match) return;
 
   const entry = cookieStore.get(match[1]);
   if (!entry) {
-    await interaction.reply({ content: '❌ Cookie expired — run the command again.', ephemeral: true });
+    await interaction.reply({ content: errorHeader('Cookie Expired', 'Run the command again.'), ephemeral: true });
     return;
   }
 
@@ -79,3 +52,55 @@ export async function handleButtonInteraction(interaction: MessageComponentInter
     await interaction.reply({ content: `\`\`\`\n${entry.cookie}\n\`\`\``, ephemeral: true });
   }
 }
+
+// ─── Command definition ────────────────────────────────────────────────────
+
+const data = new SlashCommandBuilder()
+  .setName('rcookie')
+  .setDescription('Re-session a Roblox cookie (soft refresh → kill old sessions)')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addStringOption(opt =>
+    opt.setName('cookie')
+      .setDescription('The .ROBLOSECURITY cookie (full or bare CAEQ… value)')
+      .setRequired(true),
+  ) as SlashCommandBuilder;
+
+async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+
+  const oldCookie = interaction.options.getString('cookie', true).trim();
+
+  // ── Step 1: Soft-refresh to obtain a new session token ──────────────────
+  let newCookie: string | null = null;
+  let refreshDebug = '';
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const r = await refreshCookie(oldCookie);
+    refreshDebug = r.debug;
+    if (r.newCookie) { newCookie = r.newCookie; break; }
+    if (r.status === 'COOKIE_EXPIRED') break; // no point retrying
+  }
+
+  if (!newCookie) {
+    await interaction.editReply(
+      errorHeader('Re-session Failed', 'The cookie may be expired or the refresh endpoint rejected it.') +
+      `\n\`\`\`\n${refreshDebug}\n\`\`\``,
+    );
+    return;
+  }
+
+  // ── Step 2: Kill all sessions on the OLD cookie ──────────────────────────
+  const killResult = await killSessions(oldCookie);
+  const killOk = killResult.status === 'SUCCESS';
+
+  const subtitle = killOk
+    ? 'Old sessions killed. Use the buttons to copy your new cookie.'
+    : 'Could not kill old sessions — but new cookie is ready.';
+
+  const content = successHeader('Cookie Re-Sessioned', subtitle) +
+    (killOk ? '' : '\n' + warnLine(`Kill status: ${killResult.status}`));
+
+  await interaction.editReply({ content, components: [storeAndBuildRow(newCookie)] });
+}
+
+export const rcookieCommand: Command = { data, execute, handleButton: handleButtonInteraction };
