@@ -216,7 +216,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       embed.setThumbnail(result.thumbnailUrl);
     }
 
-    await interaction.editReply({ embeds: [embed], components: [buildCopyButtons(id)] });
+    await interaction.editReply({ embeds: [embed], components: [buildInitialButtons(id)] });
   } else {
     const embed = new EmbedBuilder()
       .setTitle('𖣐 Failed .ᐟ')
