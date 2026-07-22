@@ -15,7 +15,7 @@ import type { Command } from './types';
 
 const cookieStore = new Map<string, string>();
 
-function buildResetButtons(id: string): ActionRowBuilder<ButtonBuilder> {
+export function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`reset_copypc_${id}`)
@@ -226,7 +226,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         embed.setThumbnail(result.thumbnailUrl);
       }
 
-      await interaction.editReply({ embeds: [embed], components: [buildResetButtons(id)] });
+      await interaction.editReply({ embeds: [embed], components: [buildInitialButtons(id)] });
     } else {
       const embed = new EmbedBuilder()
         .setTitle('𖣐 Failed .ᐟ')
