@@ -8,16 +8,16 @@ import {
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
-import { rcookieCommand } from './commands/refresh-cookie';
-import { logCommand } from './commands/log-cookie';
-import { ccheckerCommand } from './commands/cchecker';
-import { bypassCommand } from './commands/bypass';
+import { resetCommand } from './commands/refresh-cookie';   // was rcookieCommand
+import { loginCommand } from './commands/log-cookie';       // was logCommand
+import { checkCommand } from './commands/cchecker';         // was ccheckerCommand
+import { bypassCommand } from './commands/bypass';          // new
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
-  rcookieCommand,
-  logCommand,
-  ccheckerCommand,
+  resetCommand,
+  loginCommand,
+  checkCommand,
   bypassCommand,
 ];
 
@@ -94,20 +94,21 @@ export async function startBot(): Promise<void> {
 
       for (const command of registry.values()) {
         if (!command.handleButton) continue;
-        try {
-          const shouldHandle = (
-            (command.data.name === 'rcookie' && customId.startsWith('rc_')) ||
-            (command.data.name === 'bypass' && customId.startsWith('bypass_')) ||
-            (command.data.name === 'cchecker' && customId.startsWith('cc_')) ||
-            (command.data.name === 'log' && customId.startsWith('log_'))
-          );
-          if (shouldHandle) {
+        const prefixMap: Record<string, string> = {
+          reset: 'reset_',
+          bypass: 'bypass_',
+          login: 'login_',   // if login had buttons – it doesn't
+          check: 'check_',   // if check had buttons – it doesn't
+        };
+        const prefix = prefixMap[command.data.name];
+        if (prefix && customId.startsWith(prefix)) {
+          try {
             await command.handleButton(interaction);
             handled = true;
             break;
+          } catch (err) {
+            logger.error({ err, command: command.data.name }, 'Button handler error');
           }
-        } catch (err) {
-          logger.error({ err, command: command.data.name }, 'Button handler error');
         }
       }
 
