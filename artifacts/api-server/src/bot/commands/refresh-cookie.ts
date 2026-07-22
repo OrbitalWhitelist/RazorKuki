@@ -4,182 +4,258 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
 } from 'discord.js';
-import { refreshCookie, killSessions } from '../roblox';
-import { successEmbed, errorEmbed, warnEmbed } from '../ui';
+import axios from 'axios';
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
 import type { Command } from './types';
 
-// ─── In-memory cookie store (10-min TTL) ──────────────────────────────────
+const newCookieStore = new Map<string, string>();
 
-const cookieStore = new Map<string, { cookie: string; timestamp: number }>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of cookieStore) {
-    if (now - entry.timestamp > 10 * 60 * 1000) cookieStore.delete(key);
-  }
-}, 60_000);
-
-// ─── Shared helpers ────────────────────────────────────────────────────────
-
-export function storeAndBuildRow(cookie: string): ActionRowBuilder<ButtonBuilder> {
-  const id = Math.random().toString(36).substring(2, 10);
-  cookieStore.set(id, { cookie, timestamp: Date.now() });
+export function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`cookie_mobile_${id}`).setLabel('📱 Mobile Copy').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`cookie_pc_${id}`).setLabel('💻 PC Copy').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rc_copypc_${id}`).setLabel('💻 Copy PC').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`rc_copymob_${id}`).setLabel('📱 Copy Mobile').setStyle(ButtonStyle.Secondary),
   );
 }
 
-export async function handleButtonInteraction(interaction: MessageComponentInteraction): Promise<void> {
-  const { customId } = interaction;
-  const mobileMatch = customId.match(/^cookie_mobile_(.+)$/);
-  const pcMatch     = customId.match(/^cookie_pc_(.+)$/);
-  const match       = mobileMatch ?? pcMatch;
-  if (!match) return;
-
-  const entry = cookieStore.get(match[1]);
-  if (!entry) {
-    await interaction.reply({
-      embeds: [errorEmbed('Cookie Expired', 'Run the command again — stored cookies expire after 10 minutes.')],
-      ephemeral: true,
+async function validateCookie(cookie: string): Promise<boolean> {
+  const cleanCookie = cookie.trim();
+  const jar = new CookieJar();
+  await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+  const client = wrapper(axios.create({ jar }));
+  try {
+    const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
+      },
+      validateStatus: () => true,
     });
-    return;
-  }
-
-  if (mobileMatch) {
-    await interaction.reply({ content: `\`${entry.cookie}\``, ephemeral: true });
-  } else {
-    await interaction.reply({ content: `\`\`\`\n${entry.cookie}\n\`\`\``, ephemeral: true });
+    return resp.status === 200;
+  } catch {
+    return false;
   }
 }
 
-// ─── Cookie fingerprint helper (last 10 chars of bare token) ──────────────
-
-function fp(cookie: string): string {
-  const bare = cookie.includes('|_CAEQ') ? cookie.slice(cookie.lastIndexOf('|_') + 2) : cookie;
-  return `…${bare.slice(-10)} (${bare.length}c)`;
+function extractNewCookie(jar: CookieJar): string | null {
+  const cookies = jar.getCookiesSync('https://roblox.com');
+  const robloCookie = cookies.find(c => c.key === '.ROBLOSECURITY');
+  if (robloCookie) {
+    try { return decodeURIComponent(robloCookie.value); }
+    catch { return robloCookie.value; }
+  }
+  return null;
 }
 
-function step(n: number, total: number, label: string) {
-  console.log(`\n[RCOOKIE] ─── Step ${n}/${total}: ${label} ───`);
-}
-function info(msg: string) {
-  console.log(`[RCOOKIE]   ${msg}`);
-}
-function divider() {
-  console.log('[RCOOKIE] ' + '─'.repeat(50));
-}
+async function processLogoutAll(cookie: string) {
+  const cleanCookie = cookie.trim();
+  const jar = new CookieJar();
+  await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://roblox.com');
 
-// ─── Command ───────────────────────────────────────────────────────────────
+  const client = wrapper(axios.create({ jar }));
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Origin': 'https://www.roblox.com',
+    'Referer': 'https://www.roblox.com/',
+    'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
+  };
+
+  const csrfHarvestUrl = 'https://auth.roblox.com/v2/logout';
+  const reauthUrl = 'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate';
+
+  const csrfResp = await client.post(csrfHarvestUrl, {}, { headers, validateStatus: () => true });
+  console.log(`[Roblox API Debug] CSRF harvest status: ${csrfResp.status}`);
+
+  const csrf = csrfResp.headers['x-csrf-token'];
+  if (!csrf) {
+    console.log('[Roblox API Debug] No CSRF token returned on harvest step');
+    return { success: false, newCookie: null };
+  }
+
+  headers['X-CSRF-TOKEN'] = csrf;
+
+  const authResp = await client.post(reauthUrl, {}, { headers, validateStatus: () => true });
+  console.log(`[Roblox API Debug] Reauth status: ${authResp.status}`);
+  console.log('[Roblox API Debug] Response Body:', authResp.data);
+
+  if (authResp.status !== 200) {
+    return { success: false, newCookie: null };
+  }
+
+  let newCookie = extractNewCookie(jar);
+
+  if (!newCookie && authResp.headers['set-cookie']) {
+    const rawSetCookie = Array.isArray(authResp.headers['set-cookie'])
+      ? authResp.headers['set-cookie'].join(';')
+      : authResp.headers['set-cookie'];
+    const match = rawSetCookie.match(/\.ROBLOSECURITY=([^;]+)/);
+    if (match) {
+      try { newCookie = decodeURIComponent(match[1]); }
+      catch { newCookie = match[1]; }
+    }
+  }
+
+  if (!newCookie || !(await validateCookie(newCookie))) {
+    return { success: false, newCookie: null };
+  }
+
+  let ageRestriction = 'Unknown';
+  let thumbnailUrl = '';
+  let username = 'Unknown';
+  let userId = '';
+
+  try {
+    const authUserResp = await client.get('https://users.roblox.com/v1/users/authenticated', {
+      headers: { ...headers, 'Cookie': `.ROBLOSECURITY=${newCookie}` },
+      validateStatus: () => true,
+    });
+    if (authUserResp.status === 200) {
+      userId = authUserResp.data.id;
+      username = authUserResp.data.name;
+    }
+
+    const settingsResp = await client.get('https://apis.roblox.com/user-settings-api/v1/user-settings', {
+      headers: { ...headers, 'Cookie': `.ROBLOSECURITY=${newCookie}` },
+      validateStatus: () => true,
+    });
+    if (settingsResp.status === 200) {
+      ageRestriction = settingsResp.data.contentAgeRestriction || 'Unknown';
+    }
+
+    if (userId) {
+      const thumbResp = await client.get(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`, { validateStatus: () => true });
+      if (thumbResp.status === 200 && thumbResp.data.data.length > 0) {
+        thumbnailUrl = thumbResp.data.data[0].imageUrl;
+      }
+    }
+  } catch {}
+
+  return { success: true, newCookie, ageRestriction, thumbnailUrl, username, userId };
+}
 
 const data = new SlashCommandBuilder()
   .setName('rcookie')
-  .setDescription('Re-session a Roblox cookie (soft refresh → kill old sessions)')
+  .setDescription('Logout all sessions and secure your Roblox cookie')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addStringOption(opt =>
-    opt.setName('cookie')
-      .setDescription('The .ROBLOSECURITY cookie (full or bare CAEQ… value)')
-      .setRequired(true),
-  ) as SlashCommandBuilder;
+  .addStringOption(opt => opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie').setRequired(true)) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
 
-  const oldCookie = interaction.options.getString('cookie', true).trim();
+  const oldCookie = interaction.options.getString('cookie', true);
+  const timestamp = new Date().toLocaleString();
+  const footerData = { text: `${interaction.user.username} | ${timestamp}`, iconURL: interaction.user.displayAvatarURL() };
 
-  console.log('\n[RCOOKIE] ══════════════════════════════════════════════════');
-  console.log('[RCOOKIE]  /rcookie invoked');
-  info(`Input cookie  : ${fp(oldCookie)}`);
-  console.log('[RCOOKIE] ══════════════════════════════════════════════════');
+  const progressEmbed = new EmbedBuilder()
+    .setTitle('𖣐 Processing .ᐟ')
+    .setColor('#FFFFFF')
+    .setDescription(
+      `✧ **Status:** Validating cookie...\n` +
+      `────\n` +
+      `⭑ Checking session authenticity with Roblox servers.`
+    )
+    .setFooter(footerData);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STEP 1: Soft-refresh the OLD cookie → get a NEW session token
-  //   We use the OLD cookie to authenticate the refresh request.
-  //   Roblox returns a new .ROBLOSECURITY value in Set-Cookie.
-  //   The old cookie may or may not be immediately invalidated by Roblox.
-  // ─────────────────────────────────────────────────────────────────────────
-  step(1, 3, 'Soft Refresh (POST /v2/session/refresh)');
-  info(`Using cookie  : ${fp(oldCookie)}  ← OLD cookie`);
+  await interaction.editReply({ embeds: [progressEmbed] });
 
-  let newCookie: string | null = null;
-  let refreshDebug = '';
-  const t1 = Date.now();
+  const isValid = await validateCookie(oldCookie);
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    if (attempt > 1) info(`Retrying (attempt ${attempt})…`);
-    const r = await refreshCookie(oldCookie);
-    refreshDebug = r.debug;
-    if (r.newCookie) { newCookie = r.newCookie; break; }
-    if (r.status === 'COOKIE_EXPIRED') { info('Cookie expired — aborting'); break; }
-  }
-
-  info(`Duration      : ${Date.now() - t1}ms`);
-
-  if (!newCookie) {
-    info('✗ FAILED — no new cookie returned');
-    divider();
-    await interaction.editReply({
-      embeds: [errorEmbed('Re-session Failed', `Cookie may be expired or the refresh endpoint rejected it.\n\`\`\`\n${refreshDebug}\n\`\`\``)],
-    });
+  if (!isValid) {
+    const embed = new EmbedBuilder()
+      .setTitle('𖣐 Invalid Cookie .ᐟ')
+      .setColor('#FFFFFF')
+      .setDescription(
+        `✧ **Error Occurred**\n` +
+        `────\n` +
+        `⭑ The provided cookie is not valid or has already expired.`
+      )
+      .setFooter(footerData);
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 
-  info(`✓ New cookie  : ${fp(newCookie)}  ← NEW (different from old)`);
-  info(`  Old cookie  : ${fp(oldCookie)}  ← will be killed in step 2`);
+  progressEmbed.setDescription(
+    `✧ **Status:** Refreshing session...\n` +
+    `────\n` +
+    `⭑ Logging out all active sessions and generating a secure cookie.`
+  );
+  await interaction.editReply({ embeds: [progressEmbed] });
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STEP 2: Kill all sessions on the OLD cookie
-  //   We EXPLICITLY use the OLD cookie here — not the new one.
-  //   If Roblox returns 401 (COOKIE_EXPIRED), the old cookie is already dead
-  //   (invalidated by the refresh in step 1). That is the desired outcome.
-  //   We only warn on unexpected errors (5xx, network, etc.).
-  // ─────────────────────────────────────────────────────────────────────────
-  step(2, 3, 'Kill Old Sessions (POST /v2/logoutfromallsessionsandreauthenticate)');
-  info(`Using cookie  : ${fp(oldCookie)}  ← OLD cookie (NOT the new one)`);
-  info(`New cookie    : ${fp(newCookie)}  ← will NOT be touched`);
+  const result = await processLogoutAll(oldCookie);
 
-  const t2 = Date.now();
-  const killResult = await killSessions(oldCookie);
-  info(`Duration      : ${Date.now() - t2}ms`);
-  info(`Kill status   : ${killResult.status}`);
+  if (result.success && result.newCookie) {
+    const id = Math.random().toString(36).slice(2, 10);
+    newCookieStore.set(id, result.newCookie);
 
-  // 401 = old cookie already dead (invalidated by the refresh) → success
-  // 200 = explicit kill confirmed → success
-  // anything else → partial failure but new cookie is still valid
-  const killOk = killResult.status === 'SUCCESS' || killResult.status === 'COOKIE_EXPIRED';
+    setTimeout(() => {
+      newCookieStore.delete(id);
+    }, 60000);
 
-  if (killResult.status === 'COOKIE_EXPIRED') {
-    info('✓ Old cookie already dead (invalidated by refresh) — sessions cleared');
-  } else if (killResult.status === 'SUCCESS') {
-    info('✓ Sessions killed explicitly via logout endpoint');
+    const embed = new EmbedBuilder()
+      .setTitle('𖣐 Success .ᐟ')
+      .setColor('#FFFFFF')
+      .setDescription(
+        `✧ **User Information**\n` +
+        `────\n` +
+        `⭑ **Username:** ${result.username}\n` +
+        `⭑ **User ID:** ${result.userId}\n` +
+        `────\n` +
+        `✧ **Account Details**\n` +
+        `────\n` +
+        `⭑ **Action:** Logout All Sessions\n` +
+        `⭑ **Age Filter:** ${result.ageRestriction}`
+      )
+      .setFooter(footerData);
+
+    if (result.thumbnailUrl) {
+      embed.setThumbnail(result.thumbnailUrl);
+    }
+
+    await interaction.editReply({ embeds: [embed], components: [buildCopyButtons(id)] });
   } else {
-    info(`⚠ Unexpected kill result — new cookie still valid, delivering anyway`);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // STEP 3: Deliver new cookie to user
-  // ─────────────────────────────────────────────────────────────────────────
-  step(3, 3, 'Deliver New Cookie');
-  info(`Delivering    : ${fp(newCookie)}`);
-  console.log('[RCOOKIE] ══════════════════════════════════════════════════\n');
-
-  if (killOk) {
-    await interaction.editReply({
-      embeds: [successEmbed('Cookie Re-Sessioned', 'Old sessions cleared. Use the buttons below to copy your new cookie.')],
-      components: [storeAndBuildRow(newCookie)],
-    });
-  } else {
-    await interaction.editReply({
-      embeds: [
-        warnEmbed('Cookie Refreshed — Sessions May Still Be Active',
-          `Got a new cookie but couldn't confirm old sessions were killed.\nKill status: \`${killResult.status}\`\n\nNew cookie is still valid — use the buttons to copy it.`),
-      ],
-      components: [storeAndBuildRow(newCookie)],
-    });
+    const embed = new EmbedBuilder()
+      .setTitle('𖣐 Failed .ᐟ')
+      .setColor('#FFFFFF')
+      .setDescription(
+        `✧ **Error Occurred**\n` +
+        `────\n` +
+        `⭑ The request failed or the cookie was rejected by the server.`
+      )
+      .setFooter(footerData);
+    await interaction.editReply({ embeds: [embed], components: [] });
   }
 }
 
-export const rcookieCommand: Command = { data, execute, handleButton: handleButtonInteraction };
+async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
+  const customId = interaction.customId;
+  if (!customId.startsWith('rc_')) return;
+
+  const id = customId.split('_')[2];
+
+  if (customId.startsWith('rc_copypc_')) {
+    const cookie = newCookieStore.get(id);
+    if (!cookie) {
+      await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
+      return;
+    }
+    await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
+    return;
+  }
+
+  if (customId.startsWith('rc_copymob_')) {
+    const cookie = newCookieStore.get(id);
+    if (!cookie) {
+      await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
+      return;
+    }
+    await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
+    return;
+  }
+}
+
+export const rcookieCommand: Command = { data, execute, handleButton };

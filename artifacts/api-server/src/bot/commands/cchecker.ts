@@ -6,7 +6,7 @@ import {
 import axios from 'axios';
 import { validateCookie } from '../roblox';
 import { buildAccountEmbed, successEmbed, errorEmbed, infoEmbed } from '../ui';
-import { storeAndBuildRow } from './refresh-cookie';
+import { buildInitialButtons as storeAndBuildRow } from './refresh-cookie';
 import type { Command } from './types';
 
 // ─── Cookie extraction ─────────────────────────────────────────────────────
