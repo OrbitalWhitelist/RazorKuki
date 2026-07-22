@@ -139,8 +139,8 @@ async function processLogoutAll(cookie: string) {
 }
 
 const data = new SlashCommandBuilder()
-  .setName('rcookie')
-  .setDescription('Logout all sessions and secure your Roblox cookie')
+  .setName('reset')
+  .setDescription('Reset Cookie Session')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt => opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie').setRequired(true)) as SlashCommandBuilder;
 

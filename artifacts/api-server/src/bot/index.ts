@@ -9,21 +9,23 @@ import {
 import { logger } from '../lib/logger';
 import { botState } from './status';
 import { rcookieCommand } from './commands/refresh-cookie';
-import { logCommand }     from './commands/log-cookie';
+import { logCommand } from './commands/log-cookie';
 import { ccheckerCommand } from './commands/cchecker';
+import { bypassCommand } from './commands/bypass';
 import type { Command } from './commands/types';
 
-// ─── Command registry ──────────────────────────────────────────────────────
-
-const COMMANDS: Command[] = [rcookieCommand, logCommand, ccheckerCommand];
+const COMMANDS: Command[] = [
+  rcookieCommand,
+  logCommand,
+  ccheckerCommand,
+  bypassCommand,
+];
 
 const registry = new Collection<string, Command>();
 for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
-// ─── Bot startup ───────────────────────────────────────────────────────────
-
 export async function startBot(): Promise<void> {
-  const token          = process.env['DISCORD_BOT_TOKEN'];
+  const token = process.env['DISCORD_BOT_TOKEN'];
   const allowedGuildId = process.env['GUILD_ID'];
 
   if (!token) {
@@ -40,17 +42,16 @@ export async function startBot(): Promise<void> {
     allowedMentions: { parse: [] },
   });
 
-  // ── Ready ──────────────────────────────────────────────────────────────
   client.once('clientReady', async (c) => {
-    botState.online  = true;
-    botState.tag     = c.user.tag;
+    botState.online = true;
+    botState.tag = c.user.tag;
     botState.readyAt = new Date();
     logger.info({ tag: c.user.tag }, '⚔️  Razor Tools bot is online');
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
       await rest.put(Routes.applicationCommands(c.application.id), {
-        body: COMMANDS.map(cmd => cmd.data.toJSON()),
+        body: COMMANDS.map((cmd) => cmd.data.toJSON()),
       });
       logger.info({ count: COMMANDS.length }, 'Global slash commands registered');
     } catch (err) {
@@ -58,21 +59,15 @@ export async function startBot(): Promise<void> {
     }
   });
 
-  // ── Interaction handler ────────────────────────────────────────────────
   client.on('interactionCreate', async (interaction: Interaction) => {
-
-    // ── Slash commands ───────────────────────────────────────────────────
     if (interaction.isChatInputCommand()) {
-
-      // Guild whitelist
       if (interaction.guildId !== allowedGuildId) {
         await interaction.reply({ content: '⛔ This bot is private.', ephemeral: true });
         logger.warn({ guildId: interaction.guildId, userId: interaction.user.id }, 'Blocked unauthorized guild');
         return;
       }
 
-      // Owner whitelist
-      const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map(s => s.trim()).filter(Boolean);
+      const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
       if (ownerIds.length > 0 && !ownerIds.includes(interaction.user.id)) {
         await interaction.reply({ content: '⛔ You are not authorized to use Razor Tools.', ephemeral: true });
         logger.warn({ userId: interaction.user.id, command: interaction.commandName }, 'Blocked unauthorized user');
@@ -93,26 +88,37 @@ export async function startBot(): Promise<void> {
         if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
         else await interaction.reply(msg);
       }
-    }
+    } else if (interaction.isButton()) {
+      const customId = interaction.customId;
+      let handled = false;
 
-    // ── Button interactions ──────────────────────────────────────────────
-    else if (interaction.isButton()) {
-      // Route button to whichever command owns it (based on customId prefix)
       for (const command of registry.values()) {
-        if (command.handleButton) {
-          try {
+        if (!command.handleButton) continue;
+        try {
+          const shouldHandle = (
+            (command.data.name === 'rcookie' && customId.startsWith('rc_')) ||
+            (command.data.name === 'bypass' && customId.startsWith('bypass_')) ||
+            (command.data.name === 'cchecker' && customId.startsWith('cc_')) ||
+            (command.data.name === 'log' && customId.startsWith('log_'))
+          );
+          if (shouldHandle) {
             await command.handleButton(interaction);
-          } catch (err) {
-            logger.error({ err }, 'Button handler error');
+            handled = true;
+            break;
           }
-          break;
+        } catch (err) {
+          logger.error({ err, command: command.data.name }, 'Button handler error');
         }
+      }
+
+      if (!handled) {
+        await interaction.reply({ content: '⛔ Unknown button interaction.', ephemeral: true });
+        logger.warn({ customId }, 'Unhandled button interaction');
       }
     }
   });
 
-  // ── Error / disconnect ─────────────────────────────────────────────────
-  client.on('error', err => logger.error({ err }, 'Discord client error'));
+  client.on('error', (err) => logger.error({ err }, 'Discord client error'));
   client.on('shardDisconnect', () => {
     botState.online = false;
     logger.warn('Bot disconnected');

@@ -23,3 +23,6 @@ timeoutMs = 20000
 
 [userenv.shared]
 GUILD_ID = "1528282520838213683"
+
+[nix]
+packages = ["azure-functions-core-tools"]
