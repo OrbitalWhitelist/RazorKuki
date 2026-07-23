@@ -14,7 +14,7 @@ import type { Command } from './types';
 
 const bypassStore = new Map<string, string>();
 
-function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
+function buildBypassButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`bypass_copypc_${id}`)
@@ -66,7 +66,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       iconURL: interaction.user.displayAvatarURL(),
     };
 
-    // Validate cookie first
     const validation = await validateCookie(cookie);
     if (!validation.valid) {
       const embed = new EmbedBuilder()
@@ -109,7 +108,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         if (newCookie) {
           id = Math.random().toString(36).slice(2, 10);
           bypassStore.set(id, newCookie);
-          setTimeout(() => bypassStore.delete(id), 60000);
+          setTimeout(() => bypassStore.delete(id), 300000);
           const newValidation = await validateCookie(newCookie);
           if (newValidation.valid) {
             robux = await fetchRobux(newCookie, String(newValidation.userId));
@@ -136,7 +135,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           .setImage('https://files.catbox.moe/955g15.gif')
           .setFooter(footerData);
 
-        const components = newCookie ? [buildInitialButtons(id)] : [];
+        const components = newCookie ? [buildBypassButtons(id)] : [];
         await interaction.editReply({ embeds: [embed], components });
       } else if (data.error === 'BYPASS_IN_PROGRESS') {
         const embed = new EmbedBuilder()
@@ -222,4 +221,3 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
 }
 
 export const bypassCommand: Command = { data, execute, handleButton };
-export { buildInitialButtons };

