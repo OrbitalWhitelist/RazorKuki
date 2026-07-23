@@ -11,6 +11,7 @@ import {
 import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
+import { validateCookie } from '../roblox';
 import type { Command } from './types';
 
 const cookieStore = new Map<string, string>();
@@ -45,49 +46,11 @@ async function fetchCountry(cookie: string): Promise<string> {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      const data = await resp.json() as { value: { countryName: string } };
+      const data = (await resp.json()) as { value: { countryName: string } };
       return data.value?.countryName || 'Unknown';
     }
   } catch {}
   return 'Unknown';
-}
-
-async function validateCookieWithRetry(cookie: string, maxAttempts = 3): Promise<{ valid: boolean; userId?: string; username?: string; error?: string }> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const cleanCookie = cookie.trim();
-      const jar = new CookieJar();
-      await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
-      const client = wrapper(axios.create({ jar }));
-      const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
-        },
-        validateStatus: () => true,
-        timeout: 15000,
-      });
-      if (resp.status === 200) {
-        return { valid: true, userId: String(resp.data.id), username: resp.data.name };
-      }
-      if (resp.status === 401) return { valid: false, error: '401 Unauthorized' };
-    } catch (err: any) {
-      if (attempt === maxAttempts) return { valid: false, error: err.message };
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  }
-  return { valid: false, error: 'All validation attempts failed' };
-}
-
-function extractNewCookie(jar: CookieJar): string | null {
-  try {
-    const cookies = jar.getCookiesSync('https://roblox.com');
-    const robloCookie = cookies.find(c => c.key === '.ROBLOSECURITY');
-    if (robloCookie) {
-      try { return decodeURIComponent(robloCookie.value); } catch { return robloCookie.value; }
-    }
-  } catch {}
-  return null;
 }
 
 async function processLogoutAll(cookie: string) {
@@ -110,7 +73,6 @@ async function processLogoutAll(cookie: string) {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       authResp = await client.post(url, {}, { headers, validateStatus: () => true });
-
       if (authResp.status === 403) {
         const csrf = authResp.headers['x-csrf-token'];
         if (csrf) {
@@ -118,14 +80,17 @@ async function processLogoutAll(cookie: string) {
           authResp = await client.post(url, {}, { headers, validateStatus: () => true });
         }
       }
-
       if (authResp.status === 200) {
-        newCookie = extractNewCookie(jar);
+        newCookie = (() => {
+          const cookies = jar.getCookiesSync('https://roblox.com');
+          const c = cookies.find(c => c.key === '.ROBLOSECURITY');
+          return c ? decodeURIComponent(c.value) : null;
+        })();
         if (!newCookie && authResp.headers['set-cookie']) {
-          const rawSetCookie = Array.isArray(authResp.headers['set-cookie'])
+          const raw = Array.isArray(authResp.headers['set-cookie'])
             ? authResp.headers['set-cookie'].join(';')
             : authResp.headers['set-cookie'];
-          const match = rawSetCookie.match(/\.ROBLOSECURITY=([^;]+)/);
+          const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
           if (match) newCookie = match[1];
         }
         if (newCookie) break;
@@ -137,35 +102,31 @@ async function processLogoutAll(cookie: string) {
       return { success: false, newCookie: null };
     }
 
-    const validation = await validateCookieWithRetry(newCookie);
-    if (!validation.valid) {
-      return { success: false, newCookie: null };
-    }
+    const validation = await validateCookie(newCookie, 3);
+    if (!validation.valid) return { success: false, newCookie: null };
 
     const [robux, country] = await Promise.all([
-      fetchRobux(newCookie, validation.userId!),
+      fetchRobux(newCookie, String(validation.userId!)),
       fetchCountry(newCookie),
     ]);
 
-    let thumbnailUrl = '';
+    let thumb = '';
     try {
-      const thumbResp = await client.get(
+      const resp = await client.get(
         `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${validation.userId}&size=150x150&format=Png&isCircular=false`,
         { validateStatus: () => true }
       );
-      if (thumbResp.status === 200 && thumbResp.data.data.length > 0) {
-        thumbnailUrl = thumbResp.data.data[0].imageUrl;
-      }
+      if (resp.status === 200 && resp.data.data.length) thumb = resp.data.data[0].imageUrl;
     } catch {}
 
     return {
       success: true,
       newCookie,
       username: validation.username || 'Unknown',
-      userId: validation.userId || 'Unknown',
+      userId: String(validation.userId!),
       robux,
       country,
-      thumbnailUrl,
+      thumbnailUrl: thumb,
     };
   } catch {
     return { success: false, newCookie: null };
@@ -176,7 +137,9 @@ const data = new SlashCommandBuilder()
   .setName('reset')
   .setDescription('Reset Cookie Session')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addStringOption(opt => opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie').setRequired(true)) as SlashCommandBuilder;
+  .addStringOption(opt =>
+    opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie').setRequired(true)
+  ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
@@ -191,15 +154,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setColor('#FFFFFF')
       .setDescription('✧ **Status:** Validating cookie...\n────\n⭑ Checking session authenticity with Roblox servers.')
       .setFooter(footerData);
-
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const validation = await validateCookieWithRetry(oldCookie);
+    const validation = await validateCookie(oldCookie, 3);
     if (!validation.valid) {
+      const isNetwork = validation.debug.includes('getaddrinfo') || validation.debug.includes('ENOTFOUND') || validation.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle('𖣐 Invalid Cookie .ᐟ')
+        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
-        .setDescription(`✧ **Error Occurred**\n────\n⭑ ${validation.error || 'Cookie invalid or expired.'}`)
+        .setDescription(
+          isNetwork
+            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
+            : `✧ **Error Occurred**\n────\n⭑ ${validation.debug || 'Cookie invalid or expired.'}`
+        )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
       return;
@@ -209,7 +176,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     await interaction.editReply({ embeds: [progressEmbed] });
 
     const result = await processLogoutAll(oldCookie);
-
     if (result.success && result.newCookie) {
       const id = Math.random().toString(36).slice(2, 10);
       cookieStore.set(id, result.newCookie);
@@ -232,9 +198,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         )
         .setImage('https://files.catbox.moe/955g15.gif')
         .setFooter(footerData);
-
       if (result.thumbnailUrl) embed.setThumbnail(result.thumbnailUrl);
-
       await interaction.editReply({ embeds: [embed], components: [buildResetButtons(id)] });
     } else {
       const embed = new EmbedBuilder()
@@ -249,7 +213,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setTitle('𖣐 Error .ᐟ')
       .setColor('#FFFFFF')
       .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
-      .setFooter({ text: `${interaction.user.username} | ${new Date().toLocaleString()}`, iconURL: interaction.user.displayAvatarURL() });
+      .setFooter({
+        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
+        iconURL: interaction.user.displayAvatarURL(),
+      });
     await interaction.editReply({ embeds: [embed] });
   }
 }

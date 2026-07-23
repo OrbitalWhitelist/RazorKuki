@@ -7,29 +7,11 @@ import {
 import { validateCookie } from '../roblox';
 import type { Command } from './types';
 
-interface RobuxResponse {
-  robux: number;
-}
-
-interface EmailResponse {
-  verifiedEmail: string | null;
-  pendingEmail: string | null;
-}
-
-interface ParentalResponse {
-  parents: unknown[];
-  canAddParent: boolean;
-}
-
-interface CountryResponse {
-  value: {
-    countryName: string;
-  };
-}
-
-interface ThumbnailResponse {
-  data: { imageUrl: string }[];
-}
+interface RobuxResponse { robux: number }
+interface EmailResponse { verifiedEmail: string | null; pendingEmail: string | null }
+interface ParentalResponse { parents: unknown[]; canAddParent: boolean }
+interface CountryResponse { value: { countryName: string } }
+interface ThumbnailResponse { data: { imageUrl: string }[] }
 
 async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
@@ -121,7 +103,7 @@ const data = new SlashCommandBuilder()
   .setDescription('Validating & Checking')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
-    opt.setName('cookie').setDescription('Full .ROBLOSECURITY cookie').setRequired(true),
+    opt.setName('cookie').setDescription('Full .ROBLOSECURITY cookie').setRequired(true)
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -135,14 +117,16 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       iconURL: interaction.user.displayAvatarURL(),
     };
 
-    const result = await validateCookie(cookie);
-
+    const result = await validateCookie(cookie, 3);
     if (!result.valid) {
+      const isNetwork = result.debug.includes('getaddrinfo') || result.debug.includes('ENOTFOUND') || result.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle('𖣐 Invalid Cookie .ᐟ')
+        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
         .setDescription(
-          `✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid or has expired.\n⭑ \`\`\`\n${result.debug}\n\`\`\``,
+          isNetwork
+            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
+            : `✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid or has expired.\n⭑ \`\`\`\n${result.debug}\n\`\`\``
         )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
@@ -183,21 +167,18 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         `⭑ **Email:** ${emailStatus}\n` +
         `⭑ **Parental Controls:** ${parentStatus}\n` +
         `────\n` +
-        `⭑ Your credentials were not logged.`,
+        `⭑ Your credentials were not logged.`
       )
       .setImage('https://files.catbox.moe/955g15.gif')
       .setFooter(footerData);
 
     if (thumbnail) embed.setThumbnail(thumbnail);
-
     await interaction.editReply({ embeds: [embed] });
   } catch (error: any) {
     const embed = new EmbedBuilder()
       .setTitle('𖣐 Error .ᐟ')
       .setColor('#FFFFFF')
-      .setDescription(
-        `✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`,
-      )
+      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
       .setFooter({
         text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
         iconURL: interaction.user.displayAvatarURL(),

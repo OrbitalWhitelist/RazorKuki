@@ -94,22 +94,18 @@ export async function startBot(): Promise<void> {
       const customId = interaction.customId;
       let handled = false;
 
-      for (const command of registry.values()) {
-        if (!command.handleButton) continue;
-        const prefixMap: Record<string, string> = {
-          reset: 'reset_',
-          bypass: 'bypass_',
-        };
-        const prefix = prefixMap[command.data.name];
-        if (prefix && customId.startsWith(prefix)) {
-          try {
-            await command.handleButton(interaction);
-            handled = true;
-            break;
-          } catch (err) {
-            logger.error({ err, command: command.data.name }, 'Button handler error');
-          }
-        }
+      if (customId.startsWith('reset_')) {
+        handled = true;
+        try { await resetCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Reset button error'); }
+      } else if (customId.startsWith('clear_')) {
+        handled = true;
+        try { await clearCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Clear button error'); }
+      } else if (customId.startsWith('bypass_')) {
+        handled = true;
+        try { await bypassCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Bypass button error'); }
+      } else if (customId.startsWith('check_')) {
+        handled = true;
+        try { await checkCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Check button error'); }
       }
 
       if (!handled) {
