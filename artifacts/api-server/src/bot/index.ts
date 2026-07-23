@@ -8,12 +8,11 @@ import {
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
-import { resetCommand } from './commands/refresh-cookie';   // was rcookieCommand
-import { loginCommand } from './commands/log-cookie';       // was logCommand
-import { checkCommand } from './commands/cchecker';         // was ccheckerCommand
-import { bypassCommand } from './commands/bypass';     
+import { resetCommand } from './commands/reset';
+import { loginCommand } from './commands/login';
+import { checkCommand } from './commands/check';
+import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
-
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
@@ -100,8 +99,6 @@ export async function startBot(): Promise<void> {
         const prefixMap: Record<string, string> = {
           reset: 'reset_',
           bypass: 'bypass_',
-          login: 'login_',   // if login had buttons – it doesn't
-          check: 'check_',   // if check had buttons – it doesn't
         };
         const prefix = prefixMap[command.data.name];
         if (prefix && customId.startsWith(prefix)) {
