@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import axios from 'axios';
 import { validateCookie } from '../roblox';
+import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
 const store = new Map<string, string>();
@@ -59,7 +60,7 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
       { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, validateStatus: () => true, timeout: 10000 }
     );
     if (resp.status === 200 && resp.data) return resp.data.robux || 0;
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchRobux check'); }
   return 0;
 }
 
@@ -72,7 +73,7 @@ async function fetchCountry(cookie: string): Promise<string> {
       const data = (await resp.json()) as CountryResponse;
       return data.value?.countryName || 'Unknown';
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchCountry check'); }
   return 'Unknown';
 }
 
@@ -85,7 +86,7 @@ async function fetchEmailInfo(cookie: string): Promise<{ verified: string | null
       const data = (await resp.json()) as EmailResponse;
       return { verified: data.verifiedEmail || null, pending: data.pendingEmail || null };
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchEmailInfo check'); }
   return { verified: null, pending: null };
 }
 
@@ -98,7 +99,7 @@ async function fetchParentalControls(cookie: string): Promise<{ hasParent: boole
       const data = (await resp.json()) as ParentalResponse;
       return { hasParent: (data.parents && data.parents.length > 0) || false };
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchParentalControls check'); }
   return { hasParent: false };
 }
 
@@ -138,10 +139,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const resp = await axios.get<string>(attachment.url, { responseType: 'text', validateStatus: () => true });
       fileContent = resp.data;
     } catch (err: any) {
+      logger.error({ err }, 'File download failed in check');
       const embed = new EmbedBuilder()
-        .setTitle('𖣐 Download Failed')
+        .setTitle('𖣐 Failed!')
         .setColor('#FFFFFF')
-        .setDescription(`✧ **Error**\n────\n⭑ ${err.message || 'Could not fetch file.'}`)
+        .setDescription('✧ **Error**\n────\n⭑ Could not fetch the file. Please try again.')
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
       return;
@@ -169,17 +171,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     let totalRobux = 0;
 
     for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i];
-      const validation = await validateCookie(cookie, 3);
+      const rawCookie = cookies[i];
+      const validation = await validateCookie(rawCookie, 3);
       if (!validation.valid) continue;
 
       validCount++;
       const { userId, username, displayName } = validation;
       const [robux, country, email, parental] = await Promise.all([
-        fetchRobux(cookie, String(userId)),
-        fetchCountry(cookie),
-        fetchEmailInfo(cookie),
-        fetchParentalControls(cookie),
+        fetchRobux(rawCookie, String(userId)),
+        fetchCountry(rawCookie),
+        fetchEmailInfo(rawCookie),
+        fetchParentalControls(rawCookie),
       ]);
 
       totalRobux += robux;
@@ -189,7 +191,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       else if (email.pending) emailStatus = '⏳ Pending';
 
       const id = Math.random().toString(36).slice(2, 10);
-      store.set(id, cookie);
+      store.set(id, rawCookie);
       setTimeout(() => store.delete(id), 300000);
 
       const row = buildCheckButtons(id);
@@ -229,11 +231,15 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setFooter(footerData);
     await interaction.followUp({ embeds: [summaryEmbed], ephemeral: true });
   } catch (error: any) {
+    logger.error({ err: error, userId: interaction.user.id }, 'Check command error');
     const embed = new EmbedBuilder()
-      .setTitle('𖣐 Error .ᐟ')
+      .setTitle('𖣐 Failed!')
       .setColor('#FFFFFF')
-      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
-      .setFooter({ text: `${interaction.user.username} | ${new Date().toLocaleString()}`, iconURL: interaction.user.displayAvatarURL() });
+      .setDescription('✧ **Unexpected Error**\n────\n⭑ Something went wrong. Please try again later.')
+      .setFooter({
+        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
+        iconURL: interaction.user.displayAvatarURL(),
+      });
     await interaction.editReply({ embeds: [embed] });
   }
 }

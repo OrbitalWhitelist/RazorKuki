@@ -12,6 +12,7 @@ import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
 import { validateCookie } from '../roblox';
+import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
 const cookieStore = new Map<string, string>();
@@ -36,7 +37,7 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
       { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, validateStatus: () => true, timeout: 10000 }
     );
     if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchRobux reset'); }
   return 0;
 }
 
@@ -49,7 +50,7 @@ async function fetchCountry(cookie: string): Promise<string> {
       const data = (await resp.json()) as { value: { countryName: string } };
       return data.value?.countryName || 'Unknown';
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchCountry reset'); }
   return 'Unknown';
 }
 
@@ -117,7 +118,7 @@ async function processLogoutAll(cookie: string) {
         { validateStatus: () => true }
       );
       if (resp.status === 200 && resp.data.data.length) thumb = resp.data.data[0].imageUrl;
-    } catch {}
+    } catch (err) { logger.error({ err }, 'avatar thumb reset'); }
 
     return {
       success: true,
@@ -128,7 +129,8 @@ async function processLogoutAll(cookie: string) {
       country,
       thumbnailUrl: thumb,
     };
-  } catch {
+  } catch (err) {
+    logger.error({ err }, 'processLogoutAll error');
     return { success: false, newCookie: null };
   }
 }
@@ -145,7 +147,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const oldCookie = interaction.options.getString('cookie', true);
+    const rawInput = interaction.options.getString('cookie', true);
     const timestamp = new Date().toLocaleString();
     const footerData = { text: `${interaction.user.username} | ${timestamp}`, iconURL: interaction.user.displayAvatarURL() };
 
@@ -156,26 +158,26 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setFooter(footerData);
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const validation = await validateCookie(oldCookie, 3);
+    const validation = await validateCookie(rawInput, 3);
     if (!validation.valid) {
-      const isNetwork = validation.debug.includes('getaddrinfo') || validation.debug.includes('ENOTFOUND') || validation.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
+        .setTitle(validation.isNetworkError ? '𖣐 Failed!' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
         .setDescription(
-          isNetwork
-            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
-            : `✧ **Error Occurred**\n────\n⭑ ${validation.debug || 'Cookie invalid or expired.'}`
+          validation.isNetworkError
+            ? '✧ **Failed!**\n────\n⭑ Unable to reach Roblox servers. Please try again later.'
+            : '✧ **Invalid Cookie**\n────\n⭑ The provided cookie is not valid or has expired.'
         )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
+      logger.error({ debug: validation.debug, userId: interaction.user.id }, 'Reset validation failed');
       return;
     }
 
     progressEmbed.setDescription('✧ **Status:** Refreshing session...\n────\n⭑ Logging out all active sessions and generating a secure cookie.');
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const result = await processLogoutAll(oldCookie);
+    const result = await processLogoutAll(rawInput);
     if (result.success && result.newCookie) {
       const id = Math.random().toString(36).slice(2, 10);
       cookieStore.set(id, result.newCookie);
@@ -202,17 +204,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       await interaction.editReply({ embeds: [embed], components: [buildResetButtons(id)] });
     } else {
       const embed = new EmbedBuilder()
-        .setTitle('𖣐 Failed .ᐟ')
+        .setTitle('𖣐 Failed!')
         .setColor('#FFFFFF')
-        .setDescription('✧ **Error Occurred**\n────\n⭑ The request failed or the cookie was rejected by the server.')
+        .setDescription('✧ **Error Occurred**\n────\n⭑ The request failed. Please try again later.')
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed], components: [] });
+      logger.error({ userId: interaction.user.id }, 'Reset process failed');
     }
   } catch (error: any) {
+    logger.error({ err: error, userId: interaction.user.id }, 'Reset command error');
     const embed = new EmbedBuilder()
-      .setTitle('𖣐 Error .ᐟ')
+      .setTitle('𖣐 Failed!')
       .setColor('#FFFFFF')
-      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
+      .setDescription('✧ **Unexpected Error**\n────\n⭑ Something went wrong. Please try again later.')
       .setFooter({
         text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
         iconURL: interaction.user.displayAvatarURL(),
@@ -239,7 +243,8 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
       await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
     }
   } catch (error: any) {
-    await interaction.reply({ content: `𖣐 Error: ${error.message || 'Something went wrong.'}`, ephemeral: true });
+    logger.error({ err: error }, 'Reset button error');
+    await interaction.reply({ content: '𖣐 Failed!', ephemeral: true });
   }
 }
 

