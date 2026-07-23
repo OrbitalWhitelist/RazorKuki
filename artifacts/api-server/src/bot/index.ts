@@ -11,7 +11,9 @@ import { botState } from './status';
 import { resetCommand } from './commands/refresh-cookie';   // was rcookieCommand
 import { loginCommand } from './commands/log-cookie';       // was logCommand
 import { checkCommand } from './commands/cchecker';         // was ccheckerCommand
-import { bypassCommand } from './commands/bypass';          // new
+import { bypassCommand } from './commands/bypass';     
+import { clearCommand } from './commands/clear';
+
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
@@ -19,6 +21,7 @@ const COMMANDS: Command[] = [
   loginCommand,
   checkCommand,
   bypassCommand,
+  clearCommand,
 ];
 
 const registry = new Collection<string, Command>();

