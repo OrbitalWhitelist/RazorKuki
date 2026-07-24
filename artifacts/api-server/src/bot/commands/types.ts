@@ -1,3 +1,4 @@
+// src/bot/commands/types.ts
 import {
   SlashCommandBuilder,
   SlashCommandOptionsOnlyBuilder,

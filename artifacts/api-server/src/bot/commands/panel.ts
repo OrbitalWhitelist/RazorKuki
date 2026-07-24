@@ -1,3 +1,4 @@
+// src/bot/commands/panel.ts
 import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
@@ -91,14 +92,11 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   if (!interaction.isStringSelectMenu()) return;
   if (interaction.customId !== 'panel_select') return;
 
-  // Immediately update the dropdown to reset its state (refresh)
-  await interaction.update({ components: [buildPanelSelect()] });
-
   const action = interaction.values[0];
   const userId = interaction.user.id;
 
   if (action === 'check') {
-    await interaction.followUp({
+    await interaction.reply({
       content: '📂 Please use the `/check` command directly to upload a file.\nThis action is not available in the panel.',
       flags: MessageFlags.Ephemeral,
     });

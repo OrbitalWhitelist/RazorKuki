@@ -1,3 +1,4 @@
+// src/bot/index.ts
 import {
   Client,
   Collection,
@@ -48,7 +49,6 @@ export async function startBot(): Promise<void> {
     allowedMentions: { parse: [] },
   });
 
-  // ─── Prefix commands ──────────────────────────────────────────────
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
@@ -82,8 +82,6 @@ export async function startBot(): Promise<void> {
         const channel = message.channel;
         await handleSend(channel, content);
         await message.reply(`✅ Message sent`);
-      } else {
-        // optional: ignore unknown prefix commands
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
@@ -91,7 +89,6 @@ export async function startBot(): Promise<void> {
     }
   });
 
-  // ─── Slash commands ───────────────────────────────────────────────
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;
