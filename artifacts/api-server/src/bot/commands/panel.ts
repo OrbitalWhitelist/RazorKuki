@@ -33,19 +33,19 @@ const modalSessions = new Map<string, { action: string }>();
 
 function buildPanelEmbed() {
   return buildBaseEmbed(
-    '𖣐 Razor Tools Panel',
+    '𖣐 Razor Tools Serving',
     '✧ **Welcome to Razor Tools**\n' +
     '────\n' +
     '⭑ Select an action below.\n' +
-    '⭑ You will be prompted for credentials.\n' +
+    '⭑ You will be asked for credentials.\n' +
     '⭑ Results can be delivered via DM or this channel.\n' +
     '────\n' +
-    '🔹 **Commands:**\n' +
-    '• Login – Validate and show account info\n' +
-    '• Reset – Kill all sessions and get fresh cookie\n' +
-    '• Bypass – Attempt age verification bypass\n' +
-    '• Mass Check – Upload a file of cookies\n' +
-    '• Clear – Extract raw cookie from messy text',
+    '✧ **Commands:**\n' +
+    '• Login – Check Account Info\n' +
+    '• Reset –  Invalidated Session & Get Fresh One\n' +
+    '• Bypass – Emails Removing\n' +
+    '• Check – Mass Checks Cookies Inside Files\n' +
+    '• Clear – Clear Cookies Format',
     'Razor Tools On Top!'
   );
 }
@@ -88,7 +88,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   await interaction.reply({
     embeds: [buildPanelEmbed()],
     components: buildPanelComponents(deliver),
-    flags: MessageFlags.Ephemeral,
+    // No ephemeral flag -> visible to everyone in the channel
   });
   deliveryPref.set(userId, deliver);
 }
@@ -101,7 +101,6 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     const current = deliveryPref.get(userId) || 'server';
     const next = current === 'server' ? 'dm' : 'server';
     deliveryPref.set(userId, next);
-    // Update only the toggle button while preserving action rows
     const components = buildPanelComponents(next);
     await interaction.update({ components });
     return;
