@@ -35,6 +35,7 @@ export function buildAccountEmbed(
   userId: number,
   ageDays: number,
   robux: number,
+  summary: { incoming: number; outgoing: number },
   country: string,
   emailStatus: string,
   parentalStatus: string,
@@ -50,6 +51,11 @@ export function buildAccountEmbed(
     `⭑ **Country:** ${country}\n` +
     `⭑ **Account Age:** ${ageText}\n` +
     ` **Robux:** ${robux.toLocaleString()}\n` +
+    `────\n` +
+    `✧ **Robux Summary (Year)**\n` +
+    `────\n` +
+    `⭑ **Incoming:** ${summary.incoming.toLocaleString()}\n` +
+    `⭑ **Outgoing:** ${summary.outgoing.toLocaleString()}\n` +
     `────\n` +
     `✧ **Account Details**\n` +
     `────\n` +

