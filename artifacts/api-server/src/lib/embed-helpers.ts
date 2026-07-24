@@ -1,5 +1,4 @@
 import { EmbedBuilder } from 'discord.js';
-import { EMOJIS } from './emoji';
 
 export function buildBaseEmbed(title: string, description: string, footerText = 'Razor Tools On Top!', footerIcon = 'https://files.catbox.moe/955g15.gif'): EmbedBuilder {
   return new EmbedBuilder()
@@ -26,10 +25,6 @@ export function buildIpLimitEmbed(): EmbedBuilder {
   return buildErrorEmbed('✧ **IP Limits, Try Again**\n────\n⭑ Too many requests to Roblox servers. Please wait a moment and try again.');
 }
 
-export function buildTimeoutEmbed(): EmbedBuilder {
-  return buildErrorEmbed('✧ **Try Again**\n────\n⭑ The request timed out. Please try again later.');
-}
-
 export function buildProgressEmbed(step: string): EmbedBuilder {
   return buildBaseEmbed('𖣐 Processing .ᐟ', `✧ **Status:** ${step}\n────\n⭑ Please wait...`);
 }
@@ -54,7 +49,7 @@ export function buildAccountEmbed(
     `⭑ **User ID:** ${userId}\n` +
     `⭑ **Country:** ${country}\n` +
     `⭑ **Account Age:** ${ageText}\n` +
-    `${EMOJIS.ROBUX} **Robux:** ${robux.toLocaleString()}\n` +
+    ` **Robux:** ${robux.toLocaleString()}\n` +
     `────\n` +
     `✧ **Account Details**\n` +
     `────\n` +

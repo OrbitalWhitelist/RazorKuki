@@ -17,7 +17,7 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
     opt.setName('input')
-      .setDescription('Raw cookie text with extra characters')
+      .setDescription('Insert The Cookies!')
       .setRequired(true),
   ) as SlashCommandBuilder;
 
@@ -28,7 +28,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const raw = interaction.options.getString('input', true);
     const cleaned = Roblox.extractCookie(raw);
     if (!cleaned) {
-      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookie Found**\n────\n⭑ No `.ROBLOSECURITY` token found in the provided text.')] });
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookie Found**\n────\n⭑ No valid cookie token found.')] });
       return;
     }
 
@@ -50,7 +50,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
   if (await handleCopyButtonClick(interaction)) return;
-
 }
 
 export const clearCommand: Command = { data, execute, handleButton };

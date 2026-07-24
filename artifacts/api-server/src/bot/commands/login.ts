@@ -6,7 +6,6 @@ import {
 } from 'discord.js';
 import * as Roblox from '../../lib/roblox-api';
 import { buildAccountEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildErrorEmbed } from '../../lib/embed-helpers';
-import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
@@ -15,7 +14,9 @@ const data = new SlashCommandBuilder()
   .setDescription('Validating & Checking')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((opt) =>
-    opt.setName('cookie').setDescription('Full .ROBLOSECURITY cookie').setRequired(true)
+    opt.setName('cookie')
+      .setDescription('Insert The Cookies!')
+      .setRequired(true)
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -38,10 +39,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const thumb = await Roblox.fetchAvatarThumbnail(String(validation.userId!));
 
     let emailStatus = 'No email found';
-    if (email.verified) emailStatus = `${EMOJIS.VERIFICATION} Verified: \`${email.verified}\``;
+    if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
     else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
 
-    const parentStatus = parental.hasParent ? `${EMOJIS.VERIFICATION} Parent linked` : '❌ No parent linked';
+    const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
 
     const embed = buildAccountEmbed(
       validation.username!,

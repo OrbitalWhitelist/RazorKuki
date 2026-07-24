@@ -39,7 +39,7 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addAttachmentOption((opt) =>
     opt.setName('file')
-      .setDescription('A .txt file containing cookies')
+      .setDescription('Insert .TXT Files Type')
       .setRequired(true),
   ) as SlashCommandBuilder;
 

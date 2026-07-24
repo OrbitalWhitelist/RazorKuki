@@ -132,7 +132,7 @@ export async function fetchCountry(cookie: string, retries = 2): Promise<string>
 export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
   for (let i = 0; i <= retries; i++) {
     try {
-      const resp = await fetch('https://accountsettings.roblox.com/v1/emails', {
+      const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
         headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       });
       if (resp.status === 200) {

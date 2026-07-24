@@ -16,7 +16,7 @@ const data = new SlashCommandBuilder()
   .setDescription('Reset Cookie Session')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
-    opt.setName('cookie').setDescription('The .ROBLOSECURITY cookie').setRequired(true)
+    opt.setName('cookie').setDescription('Insert The Cookie!').setRequired(true)
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
