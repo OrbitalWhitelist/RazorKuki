@@ -3,7 +3,7 @@ import {
   type ChatInputCommandInteraction,
   MessageFlags,
 } from 'discord.js';
-import { buildPanelEmbed, buildPanelSelect } from '../panel';
+import { buildPanelEmbed, buildPanelSelect } from './panel';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
