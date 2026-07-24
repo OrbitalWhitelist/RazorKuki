@@ -33,7 +33,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    // Replace fake emoji patterns
     const formatted = message
       .replace(/:Verification:/g, '<:Verification:1118968927377182771>')
       .replace(/:verification:/g, '<:Verification:1118968927377182771>');

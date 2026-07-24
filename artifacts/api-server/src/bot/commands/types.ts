@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 
 export interface Command {
-  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | { name: string; description: string };
+  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
   handleButton?: (interaction: MessageComponentInteraction) => Promise<void>;
   handleSelect?: (interaction: MessageComponentInteraction) => Promise<void>;

@@ -1,10 +1,12 @@
 import {
+  SlashCommandBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   type ModalSubmitInteraction,
   MessageFlags,
@@ -73,10 +75,17 @@ export function buildPanelSelect() {
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 }
 
-const data = {
-  name: 'panel',
-  description: 'Open the Razor Tools control panel',
-} as const;
+const data = new SlashCommandBuilder()
+  .setName('panel')
+  .setDescription('Open the Razor Tools control panel in this channel')
+  .setDefaultMemberPermissions('0') as SlashCommandBuilder;
+
+async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.reply({
+    embeds: [buildPanelEmbed()],
+    components: [buildPanelSelect()],
+  });
+}
 
 async function handleSelect(interaction: MessageComponentInteraction): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
@@ -302,8 +311,4 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   modalSessions.delete(sessionKey);
 }
 
-async function execute(interaction: any): Promise<void> {
-
-}
-
-export const panelCommand: Command = { data: { name: 'panel', description: 'Panel' } as any, execute, handleSelect, handleModal };
+export const panelCommand: Command = { data, execute, handleSelect, handleModal };
