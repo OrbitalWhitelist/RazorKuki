@@ -11,6 +11,7 @@ import {
   MessageFlags,
   type ChatInputCommandInteraction,
   SlashCommandBuilder,
+  EmbedBuilder,
 } from 'discord.js';
 import type { Command } from './types';
 import * as Roblox from '../../lib/roblox-api';
@@ -20,7 +21,6 @@ import {
   buildInvalidCookieEmbed,
   buildIpLimitEmbed,
   buildProgressEmbed,
-  buildAccountEmbed,
   buildBaseEmbed,
 } from '../../lib/embed-helpers';
 import { buildCopyButtons } from '../../lib/button-helpers';
@@ -74,6 +74,46 @@ export function buildPanelSelect() {
         .setDescription('Extract raw cookie from messy text')
     );
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+}
+
+function buildAccountEmbedLocal(
+  username: string,
+  displayName: string | null,
+  userId: number,
+  ageDays: number,
+  robux: number,
+  summary: { incoming: number; outgoing: number },
+  country: string,
+  emailStatus: string,
+  parentalStatus: string,
+  thumbnail?: string | null
+) {
+  const ageText = ageDays === -1 ? 'Unknown' : `${ageDays} days`;
+  const embed = buildBaseEmbed(
+    '𖣐 Cookie Valid .ᐟ',
+    `✧ **User Information**\n` +
+    `────\n` +
+    `⭑ **Username:** ${username}\n` +
+    `⭑ **Display Name:** ${displayName || username}\n` +
+    `⭑ **User ID:** ${userId}\n` +
+    `⭑ **Country:** ${country}\n` +
+    `⭑ **Account Age:** ${ageText}\n` +
+    `⭑ **Robux:** ${robux.toLocaleString()}\n` +
+    `────\n` +
+    `✧ **Robux Summary (Year)**\n` +
+    `────\n` +
+    `⭑ **Incoming:** ${summary.incoming.toLocaleString()}\n` +
+    `⭑ **Outgoing:** ${summary.outgoing.toLocaleString()}\n` +
+    `────\n` +
+    `✧ **Account Details**\n` +
+    `────\n` +
+    `⭑ **Email:** ${emailStatus}\n` +
+    `⭑ **Parental Controls:** ${parentalStatus}\n` +
+    `────\n` +
+    `⭑ Your credentials were not logged.`
+  );
+  if (thumbnail) embed.setThumbnail(thumbnail);
+  return embed;
 }
 
 const data = new SlashCommandBuilder()
@@ -207,7 +247,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
         const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
 
-        const embed = buildAccountEmbed(
+        const embed = buildAccountEmbedLocal(
           validation.username!,
           validation.displayName || null,
           userId,
@@ -245,41 +285,102 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
           await sendResult({ embeds: [buildErrorEmbed('✧ **Missing Password**\n────\n⭑ Password is required for bypass.')] });
           break;
         }
-        const emailInfo = await Roblox.fetchEmailInfo(cookie);
-        if (emailInfo.verified) {
-          const progressEmbed = buildProgressEmbed('Sending bypass request...');
-          await sendResult({ embeds: [progressEmbed] });
 
-          const bypassResult = await Roblox.bypassAgeVerification(cookie, password);
-          if (bypassResult.success) {
-            const embed = buildSuccessEmbed(
-              '✧ **Bypass Result**\n' +
-              `────\n` +
-              `⭑ **Status:** Success\n` +
-              `⭑ **Message:** ${bypassResult.message}\n` +
-              (bypassResult.newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
-              `⭑ Your credentials were not logged.`
-            );
-            const id = bypassResult.newCookie ? Math.random().toString(36).slice(2, 10) : '';
-            const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass', bypassResult.newCookie, delivery === 'dm') : undefined;
-            await sendResult({ embeds: [embed], components: row ? [row] : [] });
-          } else {
-            if (bypassResult.message === 'Progressing..') {
-              const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
-              await sendResult({ embeds: [embed] });
-            } else {
-              await sendResult({ embeds: [buildErrorEmbed(`✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`)] });
-            }
-          }
-        } else {
-          const embed = buildSuccessEmbed(
-            '✧ **Bypass Result**\n' +
-            `────\n` +
-            `⭑ **Status:** Success, No Mails Detected!\n` +
-            `⭑ **Username:** ${validation.username}\n` +
-            `⭑ Your credentials were not logged.`
+        const userId = validation.userId!;
+        const age = await Roblox.getUserAge(userId);
+        const robux = await Roblox.fetchRobux(cookie, String(userId));
+        const summary = await Roblox.fetchTransactionTotals(cookie, String(userId));
+        const country = await Roblox.fetchCountry(cookie);
+        const email = await Roblox.fetchEmailInfo(cookie);
+        const parental = await Roblox.fetchParentalControls(cookie);
+        const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
+
+        let emailStatus = 'No email found';
+        if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
+        else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
+        const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
+
+        if (!email.verified) {
+          const embed = buildAccountEmbedLocal(
+            validation.username!,
+            validation.displayName || null,
+            userId,
+            age,
+            robux,
+            summary,
+            country,
+            emailStatus,
+            parentStatus,
+            thumb
           );
           await sendResult({ embeds: [embed] });
+          break;
+        }
+
+        const progressEmbed = buildProgressEmbed('Sending bypass request...');
+        await sendResult({ embeds: [progressEmbed] });
+
+        const bypassResult = await Roblox.bypassAgeVerification(cookie, password);
+        if (bypassResult.success) {
+          let newCookie = bypassResult.newCookie;
+          let finalUserId = userId;
+          let finalUsername = validation.username!;
+          let finalDisplayName = validation.displayName || null;
+          let finalAge = age;
+          let finalRobux = robux;
+          let finalSummary = summary;
+          let finalCountry = country;
+          let finalEmail = email;
+          let finalParental = parental;
+          let finalThumb = thumb;
+
+          if (newCookie) {
+            const newValidation = await Roblox.validateCookie(newCookie);
+            if (newValidation.valid) {
+              finalUserId = newValidation.userId!;
+              finalUsername = newValidation.username!;
+              finalDisplayName = newValidation.displayName || null;
+              finalAge = await Roblox.getUserAge(finalUserId);
+              finalRobux = await Roblox.fetchRobux(newCookie, String(finalUserId));
+              finalSummary = await Roblox.fetchTransactionTotals(newCookie, String(finalUserId));
+              finalCountry = await Roblox.fetchCountry(newCookie);
+              finalEmail = await Roblox.fetchEmailInfo(newCookie);
+              finalParental = await Roblox.fetchParentalControls(newCookie);
+              finalThumb = await Roblox.fetchAvatarThumbnail(String(finalUserId));
+            } else {
+              newCookie = undefined;
+            }
+          }
+
+          const embed = buildAccountEmbedLocal(
+            finalUsername,
+            finalDisplayName,
+            finalUserId,
+            finalAge,
+            finalRobux,
+            finalSummary,
+            finalCountry,
+            finalEmail.verified ? `✅ Verified: \`${finalEmail.verified}\`` : 'No email found',
+            finalParental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
+            finalThumb
+          );
+
+          const id = newCookie ? Math.random().toString(36).slice(2, 10) : '';
+          const row = newCookie ? buildCopyButtons(id, 'bypass', newCookie, delivery === 'dm') : undefined;
+          await sendResult({ embeds: [embed], components: row ? [row] : [] });
+        } else {
+          if (bypassResult.message === 'Progressing..') {
+            const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
+            await sendResult({ embeds: [embed] });
+          } else {
+            await sendResult({
+              embeds: [
+                buildErrorEmbed(
+                  `✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`
+                ),
+              ],
+            });
+          }
         }
         break;
       }
