@@ -1,12 +1,10 @@
 import {
-  SlashCommandBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   type ModalSubmitInteraction,
   MessageFlags,
@@ -27,7 +25,7 @@ import { logger } from '../../lib/logger';
 
 const modalSessions = new Map<string, { action: string }>();
 
-function buildPanelEmbed() {
+export function buildPanelEmbed() {
   return buildBaseEmbed(
     '𖣐 Razor Tools Serving',
     '✧ **Welcome to Razor Tools**\n' +
@@ -46,7 +44,7 @@ function buildPanelEmbed() {
   );
 }
 
-function buildPanelSelect() {
+export function buildPanelSelect() {
   const select = new StringSelectMenuBuilder()
     .setCustomId('panel_select')
     .setPlaceholder('Choose an action')
@@ -75,17 +73,10 @@ function buildPanelSelect() {
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 }
 
-const data = new SlashCommandBuilder()
-  .setName('panel')
-  .setDescription('Open the Razor Tools control panel')
-  .setDefaultMemberPermissions('0') as SlashCommandBuilder;
-
-async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.reply({
-    embeds: [buildPanelEmbed()],
-    components: [buildPanelSelect()],
-  });
-}
+const data = {
+  name: 'panel',
+  description: 'Open the Razor Tools control panel',
+} as const;
 
 async function handleSelect(interaction: MessageComponentInteraction): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
@@ -245,7 +236,32 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
           break;
         }
         const emailInfo = await Roblox.fetchEmailInfo(cookie);
-        if (!emailInfo.verified) {
+        if (emailInfo.verified) {
+          const progressEmbed = buildProgressEmbed('Sending bypass request...');
+          await sendResult({ embeds: [progressEmbed] });
+
+          const bypassResult = await Roblox.bypassAgeVerification(cookie, password);
+          if (bypassResult.success) {
+            const embed = buildSuccessEmbed(
+              '✧ **Bypass Result**\n' +
+              `────\n` +
+              `⭑ **Status:** Success\n` +
+              `⭑ **Message:** ${bypassResult.message}\n` +
+              (bypassResult.newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
+              `⭑ Your credentials were not logged.`
+            );
+            const id = bypassResult.newCookie ? Math.random().toString(36).slice(2, 10) : '';
+            const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass', bypassResult.newCookie, delivery === 'dm') : undefined;
+            await sendResult({ embeds: [embed], components: row ? [row] : [] });
+          } else {
+            if (bypassResult.message === 'Progressing..') {
+              const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
+              await sendResult({ embeds: [embed] });
+            } else {
+              await sendResult({ embeds: [buildErrorEmbed(`✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`)] });
+            }
+          }
+        } else {
           const embed = buildSuccessEmbed(
             '✧ **Bypass Result**\n' +
             `────\n` +
@@ -254,32 +270,6 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
             `⭑ Your credentials were not logged.`
           );
           await sendResult({ embeds: [embed] });
-          break;
-        }
-
-        const progressEmbed = buildProgressEmbed('Sending bypass request...');
-        await sendResult({ embeds: [progressEmbed] });
-
-        const bypassResult = await Roblox.bypassAgeVerification(cookie, password);
-        if (bypassResult.success) {
-          const embed = buildSuccessEmbed(
-            '✧ **Bypass Result**\n' +
-            `────\n` +
-            `⭑ **Status:** Success\n` +
-            `⭑ **Message:** ${bypassResult.message}\n` +
-            (bypassResult.newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
-            `⭑ Your credentials were not logged.`
-          );
-          const id = bypassResult.newCookie ? Math.random().toString(36).slice(2, 10) : '';
-          const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass', bypassResult.newCookie, delivery === 'dm') : undefined;
-          await sendResult({ embeds: [embed], components: row ? [row] : [] });
-        } else {
-          if (bypassResult.message === 'Progressing..') {
-            const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
-            await sendResult({ embeds: [embed] });
-          } else {
-            await sendResult({ embeds: [buildErrorEmbed(`✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`)] });
-          }
         }
         break;
       }
@@ -312,4 +302,8 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   modalSessions.delete(sessionKey);
 }
 
-export const panelCommand: Command = { data, execute, handleSelect, handleModal };
+async function execute(interaction: any): Promise<void> {
+
+}
+
+export const panelCommand: Command = { data: { name: 'panel', description: 'Panel' } as any, execute, handleSelect, handleModal };

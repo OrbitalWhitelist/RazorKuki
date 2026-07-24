@@ -4,14 +4,12 @@ import { wrapper } from 'axios-cookiejar-support';
 
 export function extractCookie(raw: string): string | null {
   const trimmed = raw.trim();
-  // Match the full warning prefix + token, capture token part
   const fullMatch = trimmed.match(/_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_(CAEQ[A-Za-z0-9._\-+=\/]+)/);
-  if (fullMatch) return fullMatch[1]; // return only the token
+  if (fullMatch) return fullMatch[1];
   const bareMatch = trimmed.match(/^CAEQ[A-Za-z0-9._\-+=\/]+$/);
   if (bareMatch) return bareMatch[0];
   const codeFenceMatch = trimmed.match(/```(?:[a-z]*\n)?([A-Za-z0-9._\-+=\/]+)```/);
   if (codeFenceMatch) return extractCookie(codeFenceMatch[1]);
-  // if it looks like a token but without warning, return as is
   if (/^CAEQ[A-Za-z0-9._\-+=\/]{50,}$/.test(trimmed)) return trimmed;
   return null;
 }

@@ -15,6 +15,8 @@ import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { panelCommand } from './commands/panel';
+import { runpanelCommand } from './commands/runpanel';
+import { sendCommand } from './commands/send';
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
@@ -24,6 +26,8 @@ const COMMANDS: Command[] = [
   bypassCommand,
   clearCommand,
   panelCommand,
+  runpanelCommand,
+  sendCommand,
 ];
 
 const registry = new Collection<string, Command>();
