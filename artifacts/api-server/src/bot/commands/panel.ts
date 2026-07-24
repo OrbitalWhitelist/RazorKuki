@@ -3,7 +3,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -19,7 +18,6 @@ import {
   buildErrorEmbed,
   buildInvalidCookieEmbed,
   buildIpLimitEmbed,
-  buildTimeoutEmbed,
   buildProgressEmbed,
   buildAccountEmbed,
   buildBaseEmbed,
@@ -28,7 +26,6 @@ import { buildCopyButtons } from '../../lib/button-helpers';
 import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
 
-const deliveryPref = new Map<string, 'dm' | 'server'>();
 const modalSessions = new Map<string, { action: string }>();
 
 function buildPanelEmbed() {
@@ -37,8 +34,8 @@ function buildPanelEmbed() {
     '✧ **Welcome to Razor Tools**\n' +
     '────\n' +
     '⭑ Select an action below.\n' +
-    '⭑ You will be asked for credentials.\n' +
-    '⭑ Results can be delivered via DM or this channel.\n' +
+    '⭑ You will be asked for credentials and delivery method.\n' +
+    '⭑ Results can be sent via DM or posted in this channel.\n' +
     '────\n' +
     '✧ **Commands:**\n' +
     '• Login – Check Account Info\n' +
@@ -50,7 +47,7 @@ function buildPanelEmbed() {
   );
 }
 
-function buildPanelComponents(deliver: 'dm' | 'server') {
+function buildPanelComponents() {
   const row1 = new ActionRowBuilder<ButtonBuilder>();
   const row2 = new ActionRowBuilder<ButtonBuilder>();
   const actions = [
@@ -68,13 +65,7 @@ function buildPanelComponents(deliver: 'dm' | 'server') {
     if (i < 3) row1.addComponents(btn);
     else row2.addComponents(btn);
   });
-  const toggleLabel = deliver === 'server' ? '📨 Send to: Server' : '📨 Send to: DM';
-  const toggle = new ButtonBuilder()
-    .setCustomId('panel_toggle_delivery')
-    .setLabel(toggleLabel)
-    .setStyle(ButtonStyle.Secondary);
-  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(toggle);
-  return [row1, row2, row3];
+  return [row1, row2];
 }
 
 const data = new SlashCommandBuilder()
@@ -83,28 +74,15 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions('0') as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  const userId = interaction.user.id;
-  const deliver = deliveryPref.get(userId) || 'server';
   await interaction.reply({
     embeds: [buildPanelEmbed()],
-    components: buildPanelComponents(deliver),
-    // No ephemeral flag -> visible to everyone in the channel
+    components: buildPanelComponents(),
   });
-  deliveryPref.set(userId, deliver);
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
   const customId = interaction.customId;
   const userId = interaction.user.id;
-
-  if (customId === 'panel_toggle_delivery') {
-    const current = deliveryPref.get(userId) || 'server';
-    const next = current === 'server' ? 'dm' : 'server';
-    deliveryPref.set(userId, next);
-    const components = buildPanelComponents(next);
-    await interaction.update({ components });
-    return;
-  }
 
   const action = customId.replace('panel_', '');
   if (!['login', 'reset', 'bypass', 'check', 'clear'].includes(action)) {
@@ -132,6 +110,7 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     .setPlaceholder('Paste your cookie (including warning prefix)');
 
   const fields = [cookieInput];
+
   if (action === 'bypass') {
     const passInput = new TextInputBuilder()
       .setCustomId('password')
@@ -142,9 +121,20 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     fields.push(passInput);
   }
 
-  modal.addComponents(
-    fields.map((f) => new ActionRowBuilder<TextInputBuilder>().addComponents(f))
-  );
+  // Add a text input for delivery method
+  const deliveryInput = new TextInputBuilder()
+    .setCustomId('delivery')
+    .setLabel('Delivery method (dm or server)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setValue('server')
+    .setPlaceholder('Type "dm" for DM, or "server" for this channel');
+
+  fields.push(deliveryInput);
+
+  // Build modal with all text inputs
+  const rows = fields.map(f => new ActionRowBuilder<TextInputBuilder>().addComponents(f));
+  modal.addComponents(...rows);
 
   modalSessions.set(`${action}_${userId}`, { action });
   await interaction.showModal(modal);
@@ -162,13 +152,22 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   }
 
   const cookie = interaction.fields.getTextInputValue('cookie');
-  const password = interaction.fields.getTextInputValue('password') || undefined;
-  const deliver = deliveryPref.get(userId) || 'server';
+  let password: string | undefined;
+  if (action === 'bypass') {
+    try {
+      password = interaction.fields.getTextInputValue('password');
+    } catch {
+      password = undefined;
+    }
+  }
+
+  const deliveryRaw = interaction.fields.getTextInputValue('delivery').toLowerCase().trim();
+  const delivery = (deliveryRaw === 'dm') ? 'dm' : 'server';
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   async function sendResult(content: any) {
-    if (deliver === 'dm') {
+    if (delivery === 'dm') {
       try {
         await interaction.user.send(content);
         await interaction.editReply({ content: '✅ Result sent to your DMs.' });
