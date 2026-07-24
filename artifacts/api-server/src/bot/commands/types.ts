@@ -1,11 +1,14 @@
-import type {
-  ChatInputCommandInteraction,
-  MessageComponentInteraction,
+import {
   SlashCommandBuilder,
+  SlashCommandOptionsOnlyBuilder,
+  type ChatInputCommandInteraction,
+  type MessageComponentInteraction,
+  type ModalSubmitInteraction,
 } from 'discord.js';
 
 export interface Command {
-  data: SlashCommandBuilder;
-  execute(interaction: ChatInputCommandInteraction): Promise<void>;
-  handleButton?(interaction: MessageComponentInteraction): Promise<void>;
+  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+  execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+  handleButton?: (interaction: MessageComponentInteraction) => Promise<void>;
+  handleModal?: (interaction: ModalSubmitInteraction) => Promise<void>;
 }

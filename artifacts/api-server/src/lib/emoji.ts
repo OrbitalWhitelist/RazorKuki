@@ -1,0 +1,5 @@
+export const EMOJIS = {
+  VERIFICATION: '<:verification:123456789012345678>',
+  COSMIC_CROSSMARK: '<:cosmic_crossmark:123456789012345679>',
+  ROBUX: '<:Robux:123456789012345680>',
+};

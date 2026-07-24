@@ -5,6 +5,7 @@ import {
   REST,
   Routes,
   type Interaction,
+  MessageFlags,
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
@@ -13,6 +14,7 @@ import { loginCommand } from './commands/login';
 import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
+import { panelCommand } from './commands/panel';
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
@@ -21,6 +23,7 @@ const COMMANDS: Command[] = [
   checkCommand,
   bypassCommand,
   clearCommand,
+  panelCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -64,58 +67,53 @@ export async function startBot(): Promise<void> {
   client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.guildId !== allowedGuildId) {
-        await interaction.reply({ content: '⛔ This bot is private.', ephemeral: true });
-        logger.warn({ guildId: interaction.guildId, userId: interaction.user.id }, 'Blocked unauthorized guild');
+        await interaction.reply({ content: '⛔ This bot is private.', flags: MessageFlags.Ephemeral });
         return;
       }
 
       const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
       if (ownerIds.length > 0 && !ownerIds.includes(interaction.user.id)) {
-        await interaction.reply({ content: '⛔ You are not authorized to use Razor Tools.', ephemeral: true });
-        logger.warn({ userId: interaction.user.id, command: interaction.commandName }, 'Blocked unauthorized user');
+        await interaction.reply({ content: '⛔ You are not authorized.', flags: MessageFlags.Ephemeral });
         return;
       }
 
       const command = registry.get(interaction.commandName);
       if (!command) {
-        logger.warn({ command: interaction.commandName }, 'Unknown command received');
+        await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
         return;
       }
 
       try {
         await command.execute(interaction);
       } catch (err) {
-        logger.error({ err, command: interaction.commandName }, 'Command execution error');
-        const msg = { content: '❌ An unexpected error occurred.', ephemeral: true };
+        logger.error({ err, command: interaction.commandName }, 'Command error');
+        const msg = { content: '❌ An error occurred.', flags: MessageFlags.Ephemeral };
         if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
         else await interaction.reply(msg);
       }
     } else if (interaction.isButton()) {
       const customId = interaction.customId;
-      let handled = false;
-
-      if (customId.startsWith('reset_')) {
-        handled = true;
-        try { await resetCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Reset button error'); }
+      if (customId.startsWith('panel_')) {
+        await panelCommand.handleButton?.(interaction);
+      } else if (customId.startsWith('reset_')) {
+        await resetCommand.handleButton?.(interaction);
       } else if (customId.startsWith('clear_')) {
-        handled = true;
-        try { await clearCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Clear button error'); }
+        await clearCommand.handleButton?.(interaction);
       } else if (customId.startsWith('bypass_')) {
-        handled = true;
-        try { await bypassCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Bypass button error'); }
+        await bypassCommand.handleButton?.(interaction);
       } else if (customId.startsWith('check_')) {
-        handled = true;
-        try { await checkCommand.handleButton?.(interaction); } catch (err) { logger.error({ err }, 'Check button error'); }
+        await checkCommand.handleButton?.(interaction);
+      } else {
+        await interaction.reply({ content: 'Unknown button.', flags: MessageFlags.Ephemeral });
       }
-
-      if (!handled) {
-        await interaction.reply({ content: '⛔ Unknown button interaction.', ephemeral: true });
-        logger.warn({ customId }, 'Unhandled button interaction');
+    } else if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith('panel_modal_')) {
+        await panelCommand.handleModal?.(interaction);
       }
     }
   });
 
-  client.on('error', (err) => logger.error({ err }, 'Discord client error'));
+  client.on('error', (err) => logger.error({ err }, 'Client error'));
   client.on('shardDisconnect', () => {
     botState.online = false;
     logger.warn('Bot disconnected');

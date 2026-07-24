@@ -1,44 +1,17 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
+  MessageFlags,
 } from 'discord.js';
+import * as Roblox from '../../lib/roblox-api';
+import { buildSuccessEmbed, buildErrorEmbed } from '../../lib/embed-helpers';
+import { buildCopyButtons } from '../../lib/button-helpers';
+import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
-const TOKEN_RE = /CAEQ[A-Za-z0-9._\-+=\/]+/;
-const WARNING_PREFIX = '_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|_';
-
-function extractRawToken(text: string): string | null {
-  const trimmed = text.trim();
-  if (trimmed.startsWith(WARNING_PREFIX)) {
-    const rest = trimmed.slice(WARNING_PREFIX.length);
-    const match = rest.match(TOKEN_RE);
-    if (match) return match[0];
-  }
-  const match = trimmed.match(TOKEN_RE);
-  if (match) return match[0];
-  return null;
-}
-
-const store = new Map<string, string>();
-
-function buildClearButtons(id: string): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`clear_copypc_${id}`)
-      .setLabel('💻 Copy PC')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`clear_copymob_${id}`)
-      .setLabel('📱 Copy Mobile')
-      .setStyle(ButtonStyle.Secondary),
-  );
-}
+const clearStore = new Map<string, string>();
 
 const data = new SlashCommandBuilder()
   .setName('clear')
@@ -52,55 +25,31 @@ const data = new SlashCommandBuilder()
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const raw = interaction.options.getString('input', true);
-    const cleaned = extractRawToken(raw);
-
+    const cleaned = Roblox.extractCookie(raw);
     if (!cleaned) {
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 No Cookie Found .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription('✧ **Error**\n────\n⭑ No `.ROBLOSECURITY` token found in the provided text.')
-        .setFooter({
-          text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
-          iconURL: interaction.user.displayAvatarURL(),
-        });
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookie Found**\n────\n⭑ No `.ROBLOSECURITY` token found in the provided text.')] });
       return;
     }
 
     const id = Math.random().toString(36).slice(2, 10);
-    store.set(id, cleaned);
-    setTimeout(() => store.delete(id), 300000);
+    clearStore.set(id, cleaned);
+    setTimeout(() => clearStore.delete(id), 300000);
 
-    const embed = new EmbedBuilder()
-      .setTitle('𖣐 Cookie Extracted .ᐟ')
-      .setColor('#FFFFFF')
-      .setDescription(
-        `✧ **Cleaned Cookie**\n` +
-        `────\n` +
-        `\`\`\`\n${cleaned}\n\`\`\`\n` +
-        `────\n` +
-        `⭑ Removed warning prefix and extra text.`
-      )
-      .setImage('https://files.catbox.moe/955g15.gif')
-      .setFooter({
-        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
-        iconURL: interaction.user.displayAvatarURL(),
-      });
-
-    await interaction.editReply({ embeds: [embed], components: [buildClearButtons(id)] });
-  } catch (error: any) {
-    const embed = new EmbedBuilder()
-      .setTitle('𖣐 Error .ᐟ')
-      .setColor('#FFFFFF')
-      .setDescription(`✧ **Unexpected Error**\n────\n⭑ ${error.message || 'Something went wrong.'}`)
-      .setFooter({
-        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
-        iconURL: interaction.user.displayAvatarURL(),
-      });
-    await interaction.editReply({ embeds: [embed] });
+    const embed = buildSuccessEmbed(
+      '✧ **Cleaned Cookie**\n' +
+      `────\n` +
+      `\`\`\`\n${cleaned}\n\`\`\`\n` +
+      `────\n` +
+      `⭑ Removed warning prefix and extra text.`
+    );
+    const row = buildCopyButtons(id, 'clear');
+    await interaction.editReply({ embeds: [embed], components: [row] });
+  } catch (err: any) {
+    logger.error({ err }, 'Clear command error');
+    await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')] });
   }
 }
 
@@ -111,18 +60,19 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     const parts = customId.split('_');
     const action = parts[1];
     const id = parts[2];
-    const token = store.get(id);
-    if (!token) {
-      await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
+    const cookie = clearStore.get(id);
+    if (!cookie) {
+      await interaction.reply({ content: '𖣐 This button has expired.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (action === 'copypc') {
-      await interaction.reply({ content: `\`\`\`\n${token}\n\`\`\``, ephemeral: true });
+      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, flags: MessageFlags.Ephemeral });
     } else if (action === 'copymob') {
-      await interaction.reply({ content: `\`${token}\``, ephemeral: true });
+      await interaction.reply({ content: `\`${cookie}\``, flags: MessageFlags.Ephemeral });
     }
-  } catch (error: any) {
-    await interaction.reply({ content: `𖣐 Error: ${error.message || 'Something went wrong.'}`, ephemeral: true });
+  } catch (err: any) {
+    logger.error({ err }, 'Clear button error');
+    await interaction.reply({ content: '𖣐 Error', flags: MessageFlags.Ephemeral });
   }
 }
 

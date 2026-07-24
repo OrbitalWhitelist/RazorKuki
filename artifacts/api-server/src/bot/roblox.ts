@@ -2,11 +2,6 @@ import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
 
-const HOSTS = [
-  { host: 'users.roblox.com', ip: '104.18.2.63' },
-  { host: 'users.roblox.com', ip: null }, // fallback to domain
-];
-
 export function extractCookie(raw: string): string | null {
   const trimmed = raw.trim();
   const fullMatch = trimmed.match(/_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/);
@@ -19,7 +14,7 @@ export function extractCookie(raw: string): string | null {
   return null;
 }
 
-export async function validateCookie(cookie: string, maxAttempts = 3): Promise<{
+export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
   valid: boolean;
   userId?: number;
   username?: string;
@@ -38,67 +33,72 @@ export async function validateCookie(cookie: string, maxAttempts = 3): Promise<{
 
   const trimmed = rawCookie.trim();
 
-  // Try each host (IP first, then domain)
-  for (const entry of HOSTS) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const jar = new CookieJar();
-        await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
-        const client = wrapper(axios.create({ jar }));
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+      const client = wrapper(axios.create({ jar }));
 
-        const url = entry.ip
-          ? `https://${entry.ip}/v1/users/authenticated`
-          : `https://${entry.host}/v1/users/authenticated`;
-
-        const headers: Record<string, string> = {
+      const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
+        headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Cookie': `.ROBLOSECURITY=${trimmed}`,
+        },
+        validateStatus: () => true,
+        timeout: 20000,
+      });
+
+      log(`Attempt ${attempt}: status ${resp.status}`);
+      if (resp.status === 200) {
+        const data = resp.data;
+        return {
+          valid: true,
+          userId: data.id,
+          username: data.name,
+          displayName: data.displayName,
+          debug: debugLines.join('\n'),
+          isNetworkError: false,
         };
-        if (entry.ip) {
-          headers['Host'] = entry.host;
-        }
-
-        const resp = await client.get(url, {
-          headers,
-          validateStatus: () => true,
-          timeout: 20000, // 20 seconds
-        });
-
-        log(`Attempt ${attempt} (${entry.ip || entry.host}): status ${resp.status}`);
-        if (resp.status === 200) {
-          const data = resp.data;
-          return {
-            valid: true,
-            userId: data.id,
-            username: data.name,
-            displayName: data.displayName,
-            debug: debugLines.join('\n'),
-            isNetworkError: false,
-          };
-        }
-        if (resp.status === 401) {
-          log('Cookie invalid (401)');
-          return { valid: false, debug: debugLines.join('\n'), isNetworkError: false };
-        }
-        if (resp.status === 530) {
-          log(`Network error (${resp.status})`);
-          // Continue to next attempt/host
-        }
-      } catch (err: any) {
-        log(`Attempt ${attempt} (${entry.ip || entry.host}) error: ${err.message}`);
-        if (attempt === maxAttempts) {
-          // Move to next host
-          break;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
+      if (resp.status === 401) {
+        log('Cookie invalid (401)');
+        return { valid: false, debug: debugLines.join('\n'), isNetworkError: false };
+      }
+      if (resp.status === 429 || resp.status === 530) {
+        log(`Rate limited or Cloudflare error (${resp.status})`);
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 10000) + Math.random() * 1000;
+          log(`Waiting ${Math.round(delay)}ms before retry`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+    } catch (err: any) {
+      log(`Attempt ${attempt} error: ${err.message}`);
+      if (attempt === maxAttempts) {
+        const isNetwork = err.message.includes('getaddrinfo') || err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT');
+        return { valid: false, debug: debugLines.join('\n'), isNetworkError: isNetwork };
+      }
+      const delay = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.random() * 1000;
+      log(`Waiting ${Math.round(delay)}ms before retry`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
 
-  // If we've exhausted all hosts and attempts
   return {
     valid: false,
     debug: debugLines.join('\n'),
     isNetworkError: true,
   };
+}
+
+export async function getUserAge(userId: number): Promise<number> {
+  try {
+    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: 10000 });
+    const created = new Date(resp.data.created);
+    const now = new Date();
+    const diff = now.getTime() - created.getTime();
+    return Math.floor(diff / (1000 * 3600 * 24));
+  } catch {
+    return -1;
+  }
 }

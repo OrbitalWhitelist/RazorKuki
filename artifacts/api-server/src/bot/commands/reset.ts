@@ -1,139 +1,17 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
+  MessageFlags,
 } from 'discord.js';
-import axios from 'axios';
-import { wrapper } from 'axios-cookiejar-support';
-import { CookieJar } from 'tough-cookie';
-import { validateCookie } from '../roblox';
+import * as Roblox from '../../lib/roblox-api';
+import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed } from '../../lib/embed-helpers';
+import { buildCopyButtons } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
-const cookieStore = new Map<string, string>();
-
-function buildResetButtons(id: string): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`reset_copypc_${id}`)
-      .setLabel('💻 Copy PC')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`reset_copymob_${id}`)
-      .setLabel('📱 Copy Mobile')
-      .setStyle(ButtonStyle.Secondary),
-  );
-}
-
-async function fetchRobux(cookie: string, userId: string): Promise<number> {
-  try {
-    const resp = await axios.get(
-      `https://economy.roblox.com/v1/users/${userId}/currency`,
-      { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, validateStatus: () => true, timeout: 10000 }
-    );
-    if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
-  } catch (err) { logger.error({ err }, 'fetchRobux reset'); }
-  return 0;
-}
-
-async function fetchCountry(cookie: string): Promise<string> {
-  try {
-    const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { value: { countryName: string } };
-      return data.value?.countryName || 'Unknown';
-    }
-  } catch (err) { logger.error({ err }, 'fetchCountry reset'); }
-  return 'Unknown';
-}
-
-async function processLogoutAll(cookie: string) {
-  try {
-    const cleanCookie = cookie.trim();
-    const jar = new CookieJar();
-    await jar.setCookie(`.ROBLOSECURITY=${cleanCookie}; Domain=.roblox.com; Path=/`, 'https://roblox.com');
-    const client = wrapper(axios.create({ jar }));
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Origin': 'https://www.roblox.com',
-      'Referer': 'https://www.roblox.com/',
-      'Cookie': `.ROBLOSECURITY=${cleanCookie}`,
-    };
-
-    const url = 'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate';
-    let newCookie: string | null = null;
-    let authResp;
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      authResp = await client.post(url, {}, { headers, validateStatus: () => true });
-      if (authResp.status === 403) {
-        const csrf = authResp.headers['x-csrf-token'];
-        if (csrf) {
-          headers['X-CSRF-TOKEN'] = csrf;
-          authResp = await client.post(url, {}, { headers, validateStatus: () => true });
-        }
-      }
-      if (authResp.status === 200) {
-        newCookie = (() => {
-          const cookies = jar.getCookiesSync('https://roblox.com');
-          const c = cookies.find(c => c.key === '.ROBLOSECURITY');
-          return c ? decodeURIComponent(c.value) : null;
-        })();
-        if (!newCookie && authResp.headers['set-cookie']) {
-          const raw = Array.isArray(authResp.headers['set-cookie'])
-            ? authResp.headers['set-cookie'].join(';')
-            : authResp.headers['set-cookie'];
-          const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
-          if (match) newCookie = match[1];
-        }
-        if (newCookie) break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    }
-
-    if (!newCookie || authResp?.status !== 200) {
-      return { success: false, newCookie: null };
-    }
-
-    const validation = await validateCookie(newCookie, 3);
-    if (!validation.valid) return { success: false, newCookie: null };
-
-    const [robux, country] = await Promise.all([
-      fetchRobux(newCookie, String(validation.userId!)),
-      fetchCountry(newCookie),
-    ]);
-
-    let thumb = '';
-    try {
-      const resp = await client.get(
-        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${validation.userId}&size=150x150&format=Png&isCircular=false`,
-        { validateStatus: () => true }
-      );
-      if (resp.status === 200 && resp.data.data.length) thumb = resp.data.data[0].imageUrl;
-    } catch (err) { logger.error({ err }, 'avatar thumb reset'); }
-
-    return {
-      success: true,
-      newCookie,
-      username: validation.username || 'Unknown',
-      userId: String(validation.userId!),
-      robux,
-      country,
-      thumbnailUrl: thumb,
-    };
-  } catch (err) {
-    logger.error({ err }, 'processLogoutAll error');
-    return { success: false, newCookie: null };
-  }
-}
+const resetStore = new Map<string, string>();
 
 const data = new SlashCommandBuilder()
   .setName('reset')
@@ -145,83 +23,40 @@ const data = new SlashCommandBuilder()
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const rawInput = interaction.options.getString('cookie', true);
-    const timestamp = new Date().toLocaleString();
-    const footerData = { text: `${interaction.user.username} | ${timestamp}`, iconURL: interaction.user.displayAvatarURL() };
-
-    const progressEmbed = new EmbedBuilder()
-      .setTitle('𖣐 Processing .ᐟ')
-      .setColor('#FFFFFF')
-      .setDescription('✧ **Status:** Validating cookie...\n────\n⭑ Checking session authenticity with Roblox servers.')
-      .setFooter(footerData);
-    await interaction.editReply({ embeds: [progressEmbed] });
-
-    const validation = await validateCookie(rawInput, 3);
+    const rawCookie = interaction.options.getString('cookie', true);
+    const validation = await Roblox.validateCookie(rawCookie);
     if (!validation.valid) {
-      const embed = new EmbedBuilder()
-        .setTitle(validation.isNetworkError ? '𖣐 Failed!' : '𖣐 Invalid Cookie .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription(
-          validation.isNetworkError
-            ? '✧ **Failed!**\n────\n⭑ Unable to reach Roblox servers. Please try again later.'
-            : '✧ **Invalid Cookie**\n────\n⭑ The provided cookie is not valid or has expired.'
-        )
-        .setFooter(footerData);
+      const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
       await interaction.editReply({ embeds: [embed] });
-      logger.error({ debug: validation.debug, userId: interaction.user.id }, 'Reset validation failed');
       return;
     }
 
-    progressEmbed.setDescription('✧ **Status:** Refreshing session...\n────\n⭑ Logging out all active sessions and generating a secure cookie.');
+    const progressEmbed = buildProgressEmbed('Refreshing session...');
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const result = await processLogoutAll(rawInput);
+    const result = await Roblox.killAndRefreshSession(rawCookie);
     if (result.success && result.newCookie) {
       const id = Math.random().toString(36).slice(2, 10);
-      cookieStore.set(id, result.newCookie);
-      setTimeout(() => cookieStore.delete(id), 300000);
+      resetStore.set(id, result.newCookie);
+      setTimeout(() => resetStore.delete(id), 300000);
 
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 Success .ᐟ')
-        .setColor('#FFFFFF')
-        .setDescription(
-          `✧ **User Information**\n` +
-          `────\n` +
-          `⭑ **Username:** ${result.username}\n` +
-          `⭑ **User ID:** ${result.userId}\n` +
-          `⭑ **Country:** ${result.country || 'Unknown'}\n` +
-          `💰 **Robux:** ${result.robux.toLocaleString()} \n` +
-          `────\n` +
-          `✧ **Account Details**\n` +
-          `────\n` +
-          `⭑ **Action:** Logout All Sessions`
-        )
-        .setImage('https://files.catbox.moe/955g15.gif')
-        .setFooter(footerData);
-      if (result.thumbnailUrl) embed.setThumbnail(result.thumbnailUrl);
-      await interaction.editReply({ embeds: [embed], components: [buildResetButtons(id)] });
+      const embed = buildSuccessEmbed(
+        '✧ **Reset Successful**\n' +
+        `────\n` +
+        `⭑ New cookie issued.\n` +
+        `⭑ Old session killed.\n` +
+        `⭑ Your credentials were not logged.`
+      );
+      const row = buildCopyButtons(id, 'reset');
+      await interaction.editReply({ embeds: [embed], components: [row] });
     } else {
-      const embed = new EmbedBuilder()
-        .setTitle('𖣐 Failed!')
-        .setColor('#FFFFFF')
-        .setDescription('✧ **Error Occurred**\n────\n⭑ The request failed. Please try again later.')
-        .setFooter(footerData);
-      await interaction.editReply({ embeds: [embed], components: [] });
-      logger.error({ userId: interaction.user.id }, 'Reset process failed');
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Reset Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
     }
-  } catch (error: any) {
-    logger.error({ err: error, userId: interaction.user.id }, 'Reset command error');
-    const embed = new EmbedBuilder()
-      .setTitle('𖣐 Failed!')
-      .setColor('#FFFFFF')
-      .setDescription('✧ **Unexpected Error**\n────\n⭑ Something went wrong. Please try again later.')
-      .setFooter({
-        text: `${interaction.user.username} | ${new Date().toLocaleString()}`,
-        iconURL: interaction.user.displayAvatarURL(),
-      });
-    await interaction.editReply({ embeds: [embed] });
+  } catch (err: any) {
+    logger.error({ err }, 'Reset command error');
+    await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')] });
   }
 }
 
@@ -232,19 +67,19 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     const parts = customId.split('_');
     const action = parts[1];
     const id = parts[2];
-    const cookie = cookieStore.get(id);
+    const cookie = resetStore.get(id);
     if (!cookie) {
-      await interaction.reply({ content: '𖣐 This button has expired. Please run the command again.', ephemeral: true });
+      await interaction.reply({ content: '𖣐 This button has expired.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (action === 'copypc') {
-      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, ephemeral: true });
+      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, flags: MessageFlags.Ephemeral });
     } else if (action === 'copymob') {
-      await interaction.reply({ content: `\`${cookie}\``, ephemeral: true });
+      await interaction.reply({ content: `\`${cookie}\``, flags: MessageFlags.Ephemeral });
     }
-  } catch (error: any) {
-    logger.error({ err: error }, 'Reset button error');
-    await interaction.reply({ content: '𖣐 Failed!', ephemeral: true });
+  } catch (err: any) {
+    logger.error({ err }, 'Reset button error');
+    await interaction.reply({ content: '𖣐 Error', flags: MessageFlags.Ephemeral });
   }
 }
 
