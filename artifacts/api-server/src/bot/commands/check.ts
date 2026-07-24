@@ -1,21 +1,16 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   type ChatInputCommandInteraction,
+  type MessageComponentInteraction,
   MessageFlags,
 } from 'discord.js';
 import * as Roblox from '../../lib/roblox-api';
-import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildTimeoutEmbed, buildProgressEmbed, buildAccountEmbed } from '../../lib/embed-helpers';
-import { buildCopyButtons } from '../../lib/button-helpers';
+import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed, buildAccountEmbed } from '../../lib/embed-helpers';
+import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
-
-const store = new Map<string, string>();
 
 const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
 const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
@@ -96,10 +91,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       else if (email.pending) emailStatus = '⏳ Pending';
 
       const id = Math.random().toString(36).slice(2, 10);
-      store.set(id, rawCookie);
-      setTimeout(() => store.delete(id), 300000);
-
-      const row = buildCopyButtons(id, 'check');
+      const row = buildCopyButtons(id, 'check', rawCookie, false);
       const embed = buildAccountEmbed(
         validation.username!,
         validation.displayName || null,
@@ -125,4 +117,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   }
 }
 
-export const checkCommand: Command = { data, execute };
+async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
+  if (await handleCopyButtonClick(interaction)) return;
+
+}
+
+export const checkCommand: Command = { data, execute, handleButton };

@@ -7,11 +7,9 @@ import {
 } from 'discord.js';
 import * as Roblox from '../../lib/roblox-api';
 import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed } from '../../lib/embed-helpers';
-import { buildCopyButtons } from '../../lib/button-helpers';
+import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
-
-const resetStore = new Map<string, string>();
 
 const data = new SlashCommandBuilder()
   .setName('reset')
@@ -39,9 +37,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const result = await Roblox.killAndRefreshSession(rawCookie);
     if (result.success && result.newCookie) {
       const id = Math.random().toString(36).slice(2, 10);
-      resetStore.set(id, result.newCookie);
-      setTimeout(() => resetStore.delete(id), 300000);
-
+      const row = buildCopyButtons(id, 'reset', result.newCookie, false);
       const embed = buildSuccessEmbed(
         '✧ **Reset Successful**\n' +
         `────\n` +
@@ -49,7 +45,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         `⭑ Old session killed.\n` +
         `⭑ Your credentials were not logged.`
       );
-      const row = buildCopyButtons(id, 'reset');
       await interaction.editReply({ embeds: [embed], components: [row] });
     } else {
       await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Reset Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
@@ -61,26 +56,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  try {
-    const customId = interaction.customId;
-    if (!customId.startsWith('reset_')) return;
-    const parts = customId.split('_');
-    const action = parts[1];
-    const id = parts[2];
-    const cookie = resetStore.get(id);
-    if (!cookie) {
-      await interaction.reply({ content: '𖣐 This button has expired.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    if (action === 'copypc') {
-      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, flags: MessageFlags.Ephemeral });
-    } else if (action === 'copymob') {
-      await interaction.reply({ content: `\`${cookie}\``, flags: MessageFlags.Ephemeral });
-    }
-  } catch (err: any) {
-    logger.error({ err }, 'Reset button error');
-    await interaction.reply({ content: '𖣐 Error', flags: MessageFlags.Ephemeral });
-  }
+  if (await handleCopyButtonClick(interaction)) return;
+
 }
 
 export const resetCommand: Command = { data, execute, handleButton };

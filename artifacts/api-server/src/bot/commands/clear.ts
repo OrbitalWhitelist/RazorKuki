@@ -7,11 +7,9 @@ import {
 } from 'discord.js';
 import * as Roblox from '../../lib/roblox-api';
 import { buildSuccessEmbed, buildErrorEmbed } from '../../lib/embed-helpers';
-import { buildCopyButtons } from '../../lib/button-helpers';
+import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
-
-const clearStore = new Map<string, string>();
 
 const data = new SlashCommandBuilder()
   .setName('clear')
@@ -35,9 +33,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     }
 
     const id = Math.random().toString(36).slice(2, 10);
-    clearStore.set(id, cleaned);
-    setTimeout(() => clearStore.delete(id), 300000);
-
+    const row = buildCopyButtons(id, 'clear', cleaned, false);
     const embed = buildSuccessEmbed(
       '✧ **Cleaned Cookie**\n' +
       `────\n` +
@@ -45,7 +41,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       `────\n` +
       `⭑ Removed warning prefix and extra text.`
     );
-    const row = buildCopyButtons(id, 'clear');
     await interaction.editReply({ embeds: [embed], components: [row] });
   } catch (err: any) {
     logger.error({ err }, 'Clear command error');
@@ -54,26 +49,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  try {
-    const customId = interaction.customId;
-    if (!customId.startsWith('clear_')) return;
-    const parts = customId.split('_');
-    const action = parts[1];
-    const id = parts[2];
-    const cookie = clearStore.get(id);
-    if (!cookie) {
-      await interaction.reply({ content: '𖣐 This button has expired.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    if (action === 'copypc') {
-      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, flags: MessageFlags.Ephemeral });
-    } else if (action === 'copymob') {
-      await interaction.reply({ content: `\`${cookie}\``, flags: MessageFlags.Ephemeral });
-    }
-  } catch (err: any) {
-    logger.error({ err }, 'Clear button error');
-    await interaction.reply({ content: '𖣐 Error', flags: MessageFlags.Ephemeral });
-  }
+  if (await handleCopyButtonClick(interaction)) return;
+
 }
 
 export const clearCommand: Command = { data, execute, handleButton };

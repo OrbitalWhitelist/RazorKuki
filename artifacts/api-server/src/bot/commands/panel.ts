@@ -121,7 +121,6 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     fields.push(passInput);
   }
 
-  // Add a text input for delivery method
   const deliveryInput = new TextInputBuilder()
     .setCustomId('delivery')
     .setLabel('Delivery method (dm or server)')
@@ -132,7 +131,6 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
 
   fields.push(deliveryInput);
 
-  // Build modal with all text inputs
   const rows = fields.map(f => new ActionRowBuilder<TextInputBuilder>().addComponents(f));
   modal.addComponents(...rows);
 
@@ -227,7 +225,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
             `⭑ Your credentials were not logged.`
           );
           const id = Math.random().toString(36).slice(2, 10);
-          const row = buildCopyButtons(id, 'reset');
+          const row = buildCopyButtons(id, 'reset', result.newCookie, delivery === 'dm');
           await sendResult({ embeds: [embed], components: [row] });
         } else {
           await sendResult({ embeds: [buildErrorEmbed('✧ **Reset Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
@@ -266,7 +264,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
             `⭑ Your credentials were not logged.`
           );
           const id = bypassResult.newCookie ? Math.random().toString(36).slice(2, 10) : '';
-          const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass') : undefined;
+          const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass', bypassResult.newCookie, delivery === 'dm') : undefined;
           await sendResult({ embeds: [embed], components: row ? [row] : [] });
         } else {
           if (bypassResult.message === 'Progressing..') {

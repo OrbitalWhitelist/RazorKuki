@@ -1,20 +1,15 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   MessageFlags,
 } from 'discord.js';
 import * as Roblox from '../../lib/roblox-api';
-import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed, buildBypassNoMailEmbed } from '../../lib/embed-helpers';
-import { buildCopyButtons } from '../../lib/button-helpers';
+import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildProgressEmbed } from '../../lib/embed-helpers';
+import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
-
-const bypassStore = new Map<string, string>();
 
 const data = new SlashCommandBuilder()
   .setName('bypass')
@@ -47,7 +42,13 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     const emailInfo = await Roblox.fetchEmailInfo(rawCookie);
     if (!emailInfo.verified) {
-      const embed = buildBypassNoMailEmbed(validation.username!);
+      const embed = buildSuccessEmbed(
+        '✧ **Bypass Result**\n' +
+        `────\n` +
+        `⭑ **Status:** Success, No Mails Detected!\n` +
+        `⭑ **Username:** ${validation.username}\n` +
+        `⭑ Your credentials were not logged.`
+      );
       await interaction.editReply({ embeds: [embed] });
       return;
     }
@@ -59,10 +60,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     if (bypassResult.success) {
       const newCookie = bypassResult.newCookie;
       const id = newCookie ? Math.random().toString(36).slice(2, 10) : '';
-      if (newCookie) {
-        bypassStore.set(id, newCookie);
-        setTimeout(() => bypassStore.delete(id), 300000);
-      }
       const embed = buildSuccessEmbed(
         '✧ **Bypass Result**\n' +
         `────\n` +
@@ -71,7 +68,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         (newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
         `⭑ Your credentials were not logged.`
       );
-      const row = newCookie ? buildCopyButtons(id, 'bypass') : undefined;
+      const row = newCookie ? buildCopyButtons(id, 'bypass', newCookie, false) : undefined;
       await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
     } else {
       if (bypassResult.message === 'Progressing..') {
@@ -88,26 +85,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  try {
-    const customId = interaction.customId;
-    if (!customId.startsWith('bypass_')) return;
-    const parts = customId.split('_');
-    const action = parts[1];
-    const id = parts[2];
-    const cookie = bypassStore.get(id);
-    if (!cookie) {
-      await interaction.reply({ content: '𖣐 This button has expired.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    if (action === 'copypc') {
-      await interaction.reply({ content: `\`\`\`\n${cookie}\n\`\`\``, flags: MessageFlags.Ephemeral });
-    } else if (action === 'copymob') {
-      await interaction.reply({ content: `\`${cookie}\``, flags: MessageFlags.Ephemeral });
-    }
-  } catch (err: any) {
-    logger.error({ err }, 'Bypass button error');
-    await interaction.reply({ content: '𖣐 Error', flags: MessageFlags.Ephemeral });
-  }
+  if (await handleCopyButtonClick(interaction)) return;
+  
 }
 
 export const bypassCommand: Command = { data, execute, handleButton };
