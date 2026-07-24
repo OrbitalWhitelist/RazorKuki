@@ -106,6 +106,12 @@ export async function startBot(): Promise<void> {
       } else {
         await interaction.reply({ content: 'Unknown button.', flags: MessageFlags.Ephemeral });
       }
+    } else if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'panel_select') {
+        await panelCommand.handleSelect?.(interaction);
+      } else {
+        await interaction.reply({ content: 'Unknown select menu.', flags: MessageFlags.Ephemeral });
+      }
     } else if (interaction.isModalSubmit()) {
       if (interaction.customId.startsWith('panel_modal_')) {
         await panelCommand.handleModal?.(interaction);

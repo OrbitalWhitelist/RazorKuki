@@ -4,13 +4,15 @@ import { wrapper } from 'axios-cookiejar-support';
 
 export function extractCookie(raw: string): string | null {
   const trimmed = raw.trim();
-  const fullMatch = trimmed.match(/_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/);
-  if (fullMatch) return fullMatch[0];
-  const bareMatch = trimmed.match(/CAEQ[A-Za-z0-9._\-+=\/]{50,}/);
+  // Match the full warning prefix + token, capture token part
+  const fullMatch = trimmed.match(/_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_(CAEQ[A-Za-z0-9._\-+=\/]+)/);
+  if (fullMatch) return fullMatch[1]; // return only the token
+  const bareMatch = trimmed.match(/^CAEQ[A-Za-z0-9._\-+=\/]+$/);
   if (bareMatch) return bareMatch[0];
   const codeFenceMatch = trimmed.match(/```(?:[a-z]*\n)?([A-Za-z0-9._\-+=\/]+)```/);
   if (codeFenceMatch) return extractCookie(codeFenceMatch[1]);
-  if (/^CAEQ[A-Za-z0-9._\-+=\/]+$/.test(trimmed)) return trimmed;
+  // if it looks like a token but without warning, return as is
+  if (/^CAEQ[A-Za-z0-9._\-+=\/]{50,}$/.test(trimmed)) return trimmed;
   return null;
 }
 
@@ -150,8 +152,8 @@ export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ ver
         headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       });
       if (resp.status === 200) {
-        const data = (await resp.json()) as { verifiedEmail: string | null; pendingEmail: string | null };
-        return { verified: data.verifiedEmail || null, pending: data.pendingEmail || null };
+        const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
+        return { verified: data.verified ? data.emailAddress : null, pending: null };
       }
     } catch {}
     if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
