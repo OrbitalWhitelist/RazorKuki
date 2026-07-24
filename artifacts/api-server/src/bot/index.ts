@@ -15,8 +15,7 @@ import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { panelCommand } from './commands/panel';
-import { runpanelCommand } from './commands/runpanel';
-import { sendCommand } from './commands/send';
+import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 
 const COMMANDS: Command[] = [
@@ -26,8 +25,6 @@ const COMMANDS: Command[] = [
   bypassCommand,
   clearCommand,
   panelCommand,
-  runpanelCommand,
-  sendCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -47,10 +44,54 @@ export async function startBot(): Promise<void> {
   }
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages],
     allowedMentions: { parse: [] },
   });
 
+  // ─── Prefix commands ──────────────────────────────────────────────
+  client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith('!')) return;
+    if (!message.guildId || message.guildId !== allowedGuildId) return;
+
+    const args = message.content.slice(1).trim().split(/\s+/);
+    const command = args.shift()?.toLowerCase();
+    if (!command) return;
+
+    try {
+      if (command === 'runpanel') {
+        const channelMention = args[0];
+        if (!channelMention) {
+          await message.reply('❌ Please provide a channel mention, e.g. `!runpanel #channel`');
+          return;
+        }
+        const channelId = channelMention.replace(/[<#>]/g, '');
+        const channel = message.guild?.channels.cache.get(channelId);
+        if (!channel || !channel.isTextBased()) {
+          await message.reply('❌ Invalid channel.');
+          return;
+        }
+        await handleRunPanel(channel);
+        await message.reply(`✅ Panel sent to ${channel}`);
+      } else if (command === 'send') {
+        const content = args.join(' ');
+        if (!content) {
+          await message.reply('❌ Please provide a message to send.');
+          return;
+        }
+        const channel = message.channel;
+        await handleSend(channel, content);
+        await message.reply(`✅ Message sent`);
+      } else {
+        // optional: ignore unknown prefix commands
+      }
+    } catch (err) {
+      logger.error({ err, command }, 'Prefix command error');
+      await message.reply('❌ An error occurred while processing your command.');
+    }
+  });
+
+  // ─── Slash commands ───────────────────────────────────────────────
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;

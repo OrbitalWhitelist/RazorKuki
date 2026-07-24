@@ -1,15 +1,15 @@
 import {
-  SlashCommandBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   type ModalSubmitInteraction,
   MessageFlags,
+  type ChatInputCommandInteraction,
+  SlashCommandBuilder,
 } from 'discord.js';
 import type { Command } from './types';
 import * as Roblox from '../../lib/roblox-api';
@@ -91,11 +91,14 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   if (!interaction.isStringSelectMenu()) return;
   if (interaction.customId !== 'panel_select') return;
 
+  // Immediately update the dropdown to reset its state (refresh)
+  await interaction.update({ components: [buildPanelSelect()] });
+
   const action = interaction.values[0];
   const userId = interaction.user.id;
 
   if (action === 'check') {
-    await interaction.reply({
+    await interaction.followUp({
       content: '📂 Please use the `/check` command directly to upload a file.\nThis action is not available in the panel.',
       flags: MessageFlags.Ephemeral,
     });
