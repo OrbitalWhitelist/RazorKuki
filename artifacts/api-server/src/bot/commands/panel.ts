@@ -14,7 +14,16 @@ import {
 } from 'discord.js';
 import type { Command } from './types';
 import * as Roblox from '../../lib/roblox-api';
-import { buildSuccessEmbed, buildErrorEmbed, buildInvalidCookieEmbed, buildIpLimitEmbed, buildTimeoutEmbed, buildProgressEmbed, buildAccountEmbed } from '../../lib/embed-helpers';
+import {
+  buildSuccessEmbed,
+  buildErrorEmbed,
+  buildInvalidCookieEmbed,
+  buildIpLimitEmbed,
+  buildTimeoutEmbed,
+  buildProgressEmbed,
+  buildAccountEmbed,
+  buildBaseEmbed,
+} from '../../lib/embed-helpers';
 import { buildCopyButtons } from '../../lib/button-helpers';
 import { EMOJIS } from '../../lib/emoji';
 import { logger } from '../../lib/logger';
@@ -23,28 +32,25 @@ const deliveryPref = new Map<string, 'dm' | 'server'>();
 const modalSessions = new Map<string, { action: string }>();
 
 function buildPanelEmbed() {
-  return new EmbedBuilder()
-    .setTitle('𖣐 Razor Tools Panel')
-    .setColor('#FFFFFF')
-    .setDescription(
-      '✧ **Welcome to Razor Tools**\n' +
-      '────\n' +
-      '⭑ Select an action below.\n' +
-      '⭑ You will be prompted for credentials.\n' +
-      '⭑ Results can be delivered via DM or this channel.\n' +
-      '────\n' +
-      '🔹 **Commands:**\n' +
-      '• Login – Validate and show account info\n' +
-      '• Reset – Kill all sessions and get fresh cookie\n' +
-      '• Bypass – Attempt age verification bypass\n' +
-      '• Mass Check – Upload a file of cookies\n' +
-      '• Clear – Extract raw cookie from messy text'
-    )
-    .setImage('https://files.catbox.moe/955g15.gif')
-    .setFooter({ text: 'Razor Tools On Top!', iconURL: 'https://files.catbox.moe/955g15.gif' });
+  return buildBaseEmbed(
+    '𖣐 Razor Tools Panel',
+    '✧ **Welcome to Razor Tools**\n' +
+    '────\n' +
+    '⭑ Select an action below.\n' +
+    '⭑ You will be prompted for credentials.\n' +
+    '⭑ Results can be delivered via DM or this channel.\n' +
+    '────\n' +
+    '🔹 **Commands:**\n' +
+    '• Login – Validate and show account info\n' +
+    '• Reset – Kill all sessions and get fresh cookie\n' +
+    '• Bypass – Attempt age verification bypass\n' +
+    '• Mass Check – Upload a file of cookies\n' +
+    '• Clear – Extract raw cookie from messy text',
+    'Razor Tools On Top!'
+  );
 }
 
-function buildPanelButtons() {
+function buildPanelComponents(deliver: 'dm' | 'server') {
   const row1 = new ActionRowBuilder<ButtonBuilder>();
   const row2 = new ActionRowBuilder<ButtonBuilder>();
   const actions = [
@@ -62,12 +68,13 @@ function buildPanelButtons() {
     if (i < 3) row1.addComponents(btn);
     else row2.addComponents(btn);
   });
+  const toggleLabel = deliver === 'server' ? '📨 Send to: Server' : '📨 Send to: DM';
   const toggle = new ButtonBuilder()
     .setCustomId('panel_toggle_delivery')
-    .setLabel('📨 Send to: Server')
+    .setLabel(toggleLabel)
     .setStyle(ButtonStyle.Secondary);
-  row2.addComponents(toggle);
-  return [row1, row2];
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(toggle);
+  return [row1, row2, row3];
 }
 
 const data = new SlashCommandBuilder()
@@ -76,12 +83,14 @@ const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions('0') as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  const userId = interaction.user.id;
+  const deliver = deliveryPref.get(userId) || 'server';
   await interaction.reply({
     embeds: [buildPanelEmbed()],
-    components: buildPanelButtons(),
+    components: buildPanelComponents(deliver),
     flags: MessageFlags.Ephemeral,
   });
-  deliveryPref.set(interaction.user.id, 'server');
+  deliveryPref.set(userId, deliver);
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
@@ -92,13 +101,9 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     const current = deliveryPref.get(userId) || 'server';
     const next = current === 'server' ? 'dm' : 'server';
     deliveryPref.set(userId, next);
-    const label = next === 'server' ? '📨 Send to: Server' : '📨 Send to: DM';
-    const button = new ButtonBuilder()
-      .setCustomId('panel_toggle_delivery')
-      .setLabel(label)
-      .setStyle(ButtonStyle.Secondary);
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
-    await interaction.update({ components: [row] });
+    // Update only the toggle button while preserving action rows
+    const components = buildPanelComponents(next);
+    await interaction.update({ components });
     return;
   }
 
@@ -262,7 +267,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
             (bypassResult.newCookie ? `⭑ **New Cookie Issued:** Yes\n` : `⭑ **New Cookie Issued:** No\n`) +
             `⭑ Your credentials were not logged.`
           );
-          const id = Math.random().toString(36).slice(2, 10);
+          const id = bypassResult.newCookie ? Math.random().toString(36).slice(2, 10) : '';
           const row = bypassResult.newCookie ? buildCopyButtons(id, 'bypass') : undefined;
           await sendResult({ embeds: [embed], components: row ? [row] : [] });
         } else {
