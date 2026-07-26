@@ -16,6 +16,7 @@ import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { panelCommand } from './commands/panel';
+import { refreshCommand } from './commands/refresh';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 
@@ -26,6 +27,7 @@ const COMMANDS: Command[] = [
   bypassCommand,
   clearCommand,
   panelCommand,
+  refreshCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -145,6 +147,8 @@ export async function startBot(): Promise<void> {
         await bypassCommand.handleButton?.(interaction);
       } else if (customId.startsWith('check_')) {
         await checkCommand.handleButton?.(interaction);
+      } else if (customId.startsWith('refresh_')) {
+        await refreshCommand.handleButton?.(interaction);
       } else {
         await interaction.reply({ content: 'Unknown button.', flags: MessageFlags.Ephemeral });
       }

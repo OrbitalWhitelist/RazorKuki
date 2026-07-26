@@ -11,7 +11,6 @@ import {
   MessageFlags,
   type ChatInputCommandInteraction,
   SlashCommandBuilder,
-  EmbedBuilder,
 } from 'discord.js';
 import type { Command } from './types';
 import * as Roblox from '../../lib/roblox-api';
@@ -39,7 +38,8 @@ export function buildPanelEmbed() {
     '────\n' +
     '✧ **Commands:**\n' +
     '• Login – Check Account Info\n' +
-    '• Reset –  Invalidated Session & Get Fresh One\n' +
+    '• Refresh – Safe cookie refresh (keeps other sessions)\n' +
+    '• Reset – Kill all sessions & get fresh cookie\n' +
     '• Bypass – Emails Removing\n' +
     '• Check – Mass Checks Cookies Inside Files\n' +
     '• Clear – Clear Cookies Format',
@@ -57,9 +57,13 @@ export function buildPanelSelect() {
         .setValue('login')
         .setDescription('Validate and show account info'),
       new StringSelectMenuOptionBuilder()
-        .setLabel('🔄 Reset Session')
+        .setLabel('🔄 Refresh (Safe)')
+        .setValue('refresh')
+        .setDescription('Refresh cookie without killing other sessions'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('🔄 Reset (Kill)')
         .setValue('reset')
-        .setDescription('Kill old sessions and get fresh cookie'),
+        .setDescription('Kill all sessions and get fresh cookie'),
       new StringSelectMenuOptionBuilder()
         .setLabel('⚡ Bypass')
         .setValue('bypass')
@@ -262,6 +266,24 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         await sendResult({ embeds: [embed] });
         break;
       }
+      case 'refresh': {
+        const result = await Roblox.refreshSession(cookie);
+        if (result.success && result.newCookie) {
+          const embed = buildSuccessEmbed(
+            '✧ **Refresh Successful**\n' +
+            `────\n` +
+            `⭑ New cookie issued.\n` +
+            `⭑ Your other sessions remain active.\n` +
+            `⭑ Your credentials were not logged.`
+          );
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'refresh', result.newCookie, delivery === 'dm');
+          await sendResult({ embeds: [embed], components: [row] });
+        } else {
+          await sendResult({ embeds: [buildErrorEmbed('✧ **Refresh Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
+        }
+        break;
+      }
       case 'reset': {
         const result = await Roblox.killAndRefreshSession(cookie);
         if (result.success && result.newCookie) {
@@ -320,9 +342,31 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         const progressEmbed = buildProgressEmbed('Sending bypass request...');
         await sendResult({ embeds: [progressEmbed] });
 
-        const bypassResult = await Roblox.bypassAgeVerification(cookie, password);
-        if (bypassResult.success) {
-          let newCookie = bypassResult.newCookie;
+        let lastMessage = 'Sending bypass request...';
+        let attempts = 0;
+        const result = await (async () => {
+          let delay = 3000;
+          for (let attempt = 1; attempt <= 6; attempt++) {
+            attempts = attempt;
+            const res = await Roblox.bypassAgeVerification(cookie, password);
+            if (res.success) return res;
+            if (res.inProgress) {
+              lastMessage = `Processing... (attempt ${attempt}/6)`;
+              const updateEmbed = buildProgressEmbed(lastMessage);
+              await sendResult({ embeds: [updateEmbed] });
+              if (attempt < 6) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay = Math.min(delay * 1.5, 10000);
+              }
+              continue;
+            }
+            return res;
+          }
+          return { success: false, message: 'Still processing, please check later.', timedOut: true };
+        })();
+
+        if (result.success) {
+          let newCookie = result.newCookie;
           let finalUserId = userId;
           let finalUsername = validation.username!;
           let finalDisplayName = validation.displayName || null;
@@ -368,19 +412,17 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
           const id = newCookie ? Math.random().toString(36).slice(2, 10) : '';
           const row = newCookie ? buildCopyButtons(id, 'bypass', newCookie, delivery === 'dm') : undefined;
           await sendResult({ embeds: [embed], components: row ? [row] : [] });
+        } else if (result.timedOut) {
+          const embed = buildProgressEmbed('Bypass is still in progress. Please check later.');
+          await sendResult({ embeds: [embed] });
         } else {
-          if (bypassResult.message === 'Progressing..') {
-            const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
-            await sendResult({ embeds: [embed] });
-          } else {
-            await sendResult({
-              embeds: [
-                buildErrorEmbed(
-                  `✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`
-                ),
-              ],
-            });
-          }
+          await sendResult({
+            embeds: [
+              buildErrorEmbed(
+                `✧ **Bypass Failed**\n────\n⭑ ${result.message}\n⭑ Your credentials were not logged.`
+              ),
+            ],
+          });
         }
         break;
       }

