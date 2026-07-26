@@ -1,4 +1,3 @@
-// src/bot/commands/panel.ts
 import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
@@ -29,20 +28,21 @@ const modalSessions = new Map<string, { action: string }>();
 
 export function buildPanelEmbed() {
   return buildBaseEmbed(
-    '𖣐 Razor Tools Serving',
-    '✧ **Welcome to Razor Tools**\n' +
-    '────\n' +
-    '⭑ Select an action from the dropdown below.\n' +
-    '⭑ You will be asked for credentials and delivery method.\n' +
-    '⭑ Results can be sent via DM or posted in this channel.\n' +
-    '────\n' +
-    '✧ **Commands:**\n' +
-    '• Login – Check Account Info\n' +
-    '• Refresh – Safe cookie refresh (keeps other sessions)\n' +
-    '• Reset – Kill all sessions & get fresh cookie\n' +
-    '• Bypass – Emails Removing\n' +
-    '• Check – Mass Checks Cookies Inside Files\n' +
-    '• Clear – Clear Cookies Format',
+    '✧ 𝐑𝐚𝐳𝐨𝐫 𝐓𝐨𝐨𝐥𝐬 𝐗𝐏 ✧',
+    '──── ּ ֶָ֢.\n' +
+    '⭑ 𝑷𝒊𝒍𝒊𝒉 𝑭𝒊𝒕𝒖𝒓 𝑫𝒊𝒃𝒂𝒘𝒂𝒉! / 𝑪𝒉𝒐𝒐𝒔𝒆 𝑭𝒆𝒂𝒕𝒖𝒓𝒆𝒔 𝑩𝒆𝒍𝒐𝒘!\n' +
+    '⭑ 𝑫𝒊𝒃𝒖𝒕𝒖𝒉𝒌𝒂𝒏 𝑫𝒂𝒕𝒂 𝑳𝒐𝒈𝒊𝒏 / 𝑳𝒐𝒈𝒊𝒏 𝑪𝒓𝒆𝒅𝒆𝒏𝒕𝒊𝒂𝒍𝒔 𝑹𝒆𝒒𝒖𝒊𝒓𝒆𝒅.\n' +
+    '⭑ 𝑶𝒑𝒕𝒊𝒐𝒏𝒔 𝑹𝒆𝒔𝒖𝒍𝒕 𝑺𝒆𝒏𝒅𝒆𝒅 𝑻𝒐 : 𝑺𝒆𝒓𝒗𝒆𝒓 / 𝑫𝑴\n' +
+    '──── ּ ֶָ֢.\n' +
+    '✧ 𝘾𝙤𝙢𝙢𝙖𝙣𝙙𝙨:\n' +
+    '• 𝙇𝙤𝙜𝙞𝙣 – 𝘾𝙝𝙚𝙘𝙠 𝘼𝙘𝙘𝙤𝙪𝙣𝙩 𝙄𝙣𝙛𝙤 \n' +
+    '• 𝙍𝙚𝙛𝙧𝙚𝙨𝙝 – 𝙍𝙚𝙛𝙧𝙚𝙨𝙝𝙞𝙣𝙜 𝘾𝙤𝙤𝙠𝙞𝙚 \n' +
+    '• 𝙍𝙚𝙨𝙚𝙩 – 𝙇𝙤𝙜𝙤𝙪𝙩 𝙊𝙩𝙝𝙚𝙧𝙨 & 𝙍𝙚𝙘𝙞𝙚𝙫𝙚 𝙉𝙚𝙬 𝘾𝙤𝙤𝙠𝙞𝙚 \n' +
+    '• 𝘽𝙮𝙥𝙖𝙨𝙨 – 𝙀𝙢𝙖𝙞𝙡𝙨 𝙍𝙚𝙢𝙤𝙫𝙞𝙣𝙜 \n' +
+    '• 𝘾𝙝𝙚𝙘𝙠 – 𝙈𝙖𝙨𝙨 𝘾𝙝𝙚𝙘𝙠𝙨 𝘾𝙤𝙤𝙠𝙞𝙚𝙨 𝙄𝙣𝙨𝙞𝙙𝙚 𝙁𝙞𝙡𝙚𝙨 \n' +
+    '• 𝘾𝙡𝙚𝙖𝙧 – 𝘾𝙡𝙚𝙖𝙧 𝘾𝙤𝙤𝙠𝙞𝙚𝙨 𝙁𝙤𝙧𝙢𝙖𝙩 \n' +
+    '• 𝘾𝙋 – 𝘾𝙝𝙖𝙣𝙜𝙚𝙨 𝙋𝙖𝙨𝙨𝙬𝙤𝙧𝙙 𝘿𝙞𝙧𝙚𝙘𝙩𝙡𝙮 \n' +
+    '────────────────────────────',
     'Razor Tools On Top!'
   );
 }
@@ -75,7 +75,11 @@ export function buildPanelSelect() {
       new StringSelectMenuOptionBuilder()
         .setLabel('🧹 Clear Cookie')
         .setValue('clear')
-        .setDescription('Extract raw cookie from messy text')
+        .setDescription('Extract raw cookie from messy text'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('🔑 CP')
+        .setValue('cp')
+        .setDescription('Change Password Directly')
     );
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 }
@@ -160,7 +164,7 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
 
   const fields = [cookieInput];
 
-  if (action === 'bypass') {
+  if (action === 'bypass' || action === 'cp') {
     const passInput = new TextInputBuilder()
       .setCustomId('password')
       .setLabel('Password')
@@ -168,6 +172,16 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
       .setRequired(true)
       .setPlaceholder('Insert here...');
     fields.push(passInput);
+  }
+
+  if (action === 'cp') {
+    const newPassInput = new TextInputBuilder()
+      .setCustomId('new_password')
+      .setLabel('New Password')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setPlaceholder('Enter new password');
+    fields.push(newPassInput);
   }
 
   const deliveryInput = new TextInputBuilder()
@@ -200,11 +214,19 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
   const cookie = interaction.fields.getTextInputValue('cookie');
   let password: string | undefined;
-  if (action === 'bypass') {
+  if (action === 'bypass' || action === 'cp') {
     try {
       password = interaction.fields.getTextInputValue('password');
     } catch {
       password = undefined;
+    }
+  }
+  let newPassword: string | undefined;
+  if (action === 'cp') {
+    try {
+      newPassword = interaction.fields.getTextInputValue('new_password');
+    } catch {
+      newPassword = undefined;
     }
   }
 
@@ -423,6 +445,46 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
               ),
             ],
           });
+        }
+        break;
+      }
+      case 'cp': {
+        if (!password || !newPassword) {
+          await sendResult({ embeds: [buildErrorEmbed('✧ **Missing Credentials**\n────\n⭑ Both current and new password are required.')] });
+          break;
+        }
+
+        const twoFactor = await Roblox.checkTwoFactorStatus(cookie, String(validation.userId!));
+        if (twoFactor.enabled) {
+          const embed = buildErrorEmbed(
+            `✧ **2FA Detected**\n────\n` +
+            `⭑ Authenticator is enabled on this account.\n` +
+            `⭑ Password change is blocked for security.\n` +
+            `⭑ Please disable 2FA first or use the official Roblox interface.`
+          );
+          await sendResult({ embeds: [embed] });
+          break;
+        }
+
+        const progressEmbed = buildProgressEmbed('Changing password...');
+        await sendResult({ embeds: [progressEmbed] });
+
+        const result = await Roblox.changePassword(cookie, password, newPassword);
+        if (result.success) {
+          const embed = buildSuccessEmbed(
+            '✧ **Password Changed**\n' +
+            `────\n` +
+            `⭑ Your password has been updated successfully.\n` +
+            `⭑ Your credentials were not logged.`
+          );
+          await sendResult({ embeds: [embed] });
+        } else {
+          const embed = buildErrorEmbed(
+            `✧ **Change Failed**\n────\n` +
+            `⭑ ${result.error || 'Unknown error'}\n` +
+            `⭑ Please check your current password and try again.`
+          );
+          await sendResult({ embeds: [embed] });
         }
         break;
       }

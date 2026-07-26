@@ -1,4 +1,3 @@
-// src/bot/index.ts
 import {
   Client,
   Collection,
@@ -17,6 +16,7 @@ import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { panelCommand } from './commands/panel';
 import { refreshCommand } from './commands/refresh';
+import { cpCommand } from './commands/cp';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 
@@ -28,6 +28,7 @@ const COMMANDS: Command[] = [
   clearCommand,
   panelCommand,
   refreshCommand,
+  cpCommand,
 ];
 
 const registry = new Collection<string, Command>();
