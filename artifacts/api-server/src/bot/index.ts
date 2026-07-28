@@ -14,9 +14,9 @@ import { loginCommand } from './commands/login';
 import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
-import { panelCommand } from './commands/panel';
 import { refreshCommand } from './commands/refresh';
 import { cpCommand } from './commands/cp';
+import { panelCommand } from './commands/panel';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 
@@ -26,7 +26,6 @@ const COMMANDS: Command[] = [
   checkCommand,
   bypassCommand,
   clearCommand,
-  panelCommand,
   refreshCommand,
   cpCommand,
 ];
@@ -77,14 +76,24 @@ export async function startBot(): Promise<void> {
         await handleRunPanel(channel);
         await message.reply(`✅ Panel sent to ${channel}`);
       } else if (command === 'send') {
-        const content = args.join(' ');
+        const channelMention = args[0];
+        if (!channelMention) {
+          await message.reply('❌ Please provide a channel mention, e.g. `!send #channel Hello`');
+          return;
+        }
+        const channelId = channelMention.replace(/[<#>]/g, '');
+        const channel = message.guild?.channels.cache.get(channelId);
+        if (!channel || !channel.isTextBased()) {
+          await message.reply('❌ Invalid channel.');
+          return;
+        }
+        const content = args.slice(1).join(' ');
         if (!content) {
           await message.reply('❌ Please provide a message to send.');
           return;
         }
-        const channel = message.channel;
         await handleSend(channel, content);
-        await message.reply(`✅ Message sent`);
+        await message.reply(`✅ Message sent to ${channel}`);
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
@@ -133,7 +142,8 @@ export async function startBot(): Promise<void> {
       } catch (err) {
         logger.error({ err, command: interaction.commandName }, 'Command error');
         const msg = { content: '❌ An error occurred.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
+        if (interaction.replied || interaction.deferred) await interaction.followUp(
+          );
         else await interaction.reply(msg);
       }
     } else if (interaction.isButton()) {
