@@ -41,7 +41,6 @@ const COOLDOWN_DESTRUCTIVE = 30000;
 
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];
-  const allowedGuildId = process.env['GUILD_ID'];
 
   const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (ownerIds.length === 0) {
@@ -54,10 +53,6 @@ export async function startBot(): Promise<void> {
     logger.warn('DISCORD_BOT_TOKEN not set — bot will not start');
     return;
   }
-  if (!allowedGuildId) {
-    logger.error('GUILD_ID not set — refusing to start without a guild whitelist');
-    return;
-  }
 
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages],
@@ -67,7 +62,7 @@ export async function startBot(): Promise<void> {
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
-    if (!message.guildId || message.guildId !== allowedGuildId) return;
+    if (!message.guildId) return;
 
     if (ownerIds.length === 0) {
       logger.warn('Prefix command ignored because OWNER_IDS is empty');
@@ -150,12 +145,17 @@ export async function startBot(): Promise<void> {
   });
 
   client.on('interactionCreate', async (interaction: Interaction) => {
-    if (interaction.isChatInputCommand()) {
-      if (interaction.guildId !== allowedGuildId) {
-        await interaction.reply({ content: '⛔ This bot is private.', flags: MessageFlags.Ephemeral });
-        return;
+    if (!interaction.inGuild()) {
+      if (interaction.isRepliable()) {
+        await interaction.reply({
+          content: '⛔ This bot is only available in servers, not in DMs.',
+          flags: MessageFlags.Ephemeral,
+        });
       }
+      return;
+    }
 
+    if (interaction.isChatInputCommand()) {
       const command = registry.get(interaction.commandName);
       if (!command) {
         await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
