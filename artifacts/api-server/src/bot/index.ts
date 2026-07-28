@@ -16,8 +16,8 @@ import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { refreshCommand } from './commands/refresh';
 import { cpCommand } from './commands/cp';
-import { panelCommand } from './commands/panel';
 import { checkv2Command } from './commands/checkv2';
+import { panelCommand } from './commands/panel';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
@@ -37,22 +37,18 @@ const COMMANDS: Command[] = [
 const registry = new Collection<string, Command>();
 for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
-// Cooldown durations (in milliseconds)
-const COOLDOWN_DESTRUCTIVE = 30000; // 30 seconds for reset, bypass, cp
+const COOLDOWN_DESTRUCTIVE = 30000;
 
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];
   const allowedGuildId = process.env['GUILD_ID'];
 
-  // --- OWNER_IDS check: fail-closed ---
   const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (ownerIds.length === 0) {
-    logger.error('OWNER_IDS is empty or not set — refusing to start to prevent unauthorized access.');
-    return;
+    logger.warn('OWNER_IDS is empty — prefix commands (!runpanel, !send) will be disabled.');
+  } else {
+    logger.info({ ownerIds }, 'OWNER_IDS loaded for prefix commands');
   }
-
-  // Log the configured owners for debugging
-  logger.info({ ownerIds }, 'OWNER_IDS loaded');
 
   if (!token) {
     logger.warn('DISCORD_BOT_TOKEN not set — bot will not start');
@@ -68,16 +64,18 @@ export async function startBot(): Promise<void> {
     allowedMentions: { parse: [] },
   });
 
-  // --- Prefix commands (now gated by OWNER_IDS) ---
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
     if (!message.guildId || message.guildId !== allowedGuildId) return;
 
-    // Check if message author is in OWNER_IDS (fail-closed)
+    if (ownerIds.length === 0) {
+      logger.warn('Prefix command ignored because OWNER_IDS is empty');
+      return;
+    }
     if (!ownerIds.includes(message.author.id)) {
       logger.warn({ userId: message.author.id }, 'Unauthorized user attempted prefix command');
-      return; // silently ignore
+      return;
     }
 
     const args = message.content.slice(1).trim().split(/\s+/);
@@ -125,7 +123,6 @@ export async function startBot(): Promise<void> {
     }
   });
 
-  // --- Slash commands ---
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;
@@ -142,7 +139,6 @@ export async function startBot(): Promise<void> {
       logger.error({ err }, 'Failed to register slash commands');
     }
 
-    // Start heartbeat if configured
     const heartbeatChannelId = process.env['HEARTBEAT_CHANNEL_ID'];
     const heartbeatInterval = parseInt(process.env['HEARTBEAT_INTERVAL_HOURS'] ?? '6');
     if (heartbeatChannelId) {
@@ -153,18 +149,10 @@ export async function startBot(): Promise<void> {
     }
   });
 
-  // --- Interaction handler with cooldown ---
   client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.guildId !== allowedGuildId) {
         await interaction.reply({ content: '⛔ This bot is private.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-
-      // OWNER_IDS check (fail-closed)
-      if (!ownerIds.includes(interaction.user.id)) {
-        await interaction.reply({ content: '⛔ You are not authorized.', flags: MessageFlags.Ephemeral });
-        logger.warn({ userId: interaction.user.id, command: interaction.commandName }, 'Unauthorized slash command');
         return;
       }
 
@@ -174,7 +162,6 @@ export async function startBot(): Promise<void> {
         return;
       }
 
-      // Cooldown for destructive commands
       const destructiveCommands = ['reset', 'bypass', 'cp'];
       if (destructiveCommands.includes(interaction.commandName)) {
         const cooldown = checkCooldown(interaction.user.id, COOLDOWN_DESTRUCTIVE);
