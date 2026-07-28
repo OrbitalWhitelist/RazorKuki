@@ -2,6 +2,7 @@ export const ENDPOINTS = {
   USERS_AUTHENTICATED: 'https://users.roblox.com/v1/users/authenticated',
   USERS_USER: (userId: string) => `https://users.roblox.com/v1/users/${userId}`,
   AUTH_LOGOUT: 'https://auth.roblox.com/v2/logout',
+  AUTH_LOGIN: 'https://auth.roblox.com/v2/login',
   AUTH_SESSION_REFRESH: 'https://auth.roblox.com/v2/session/refresh',
   AUTH_LOGOUT_ALL: 'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate',
   AUTH_PASSWORD_CHANGE: 'https://auth.roblox.com/v1/user/passwords/change',
