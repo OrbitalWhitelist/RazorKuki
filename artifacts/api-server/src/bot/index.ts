@@ -19,6 +19,8 @@ import { cpCommand } from './commands/cp';
 import { panelCommand } from './commands/panel';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
+import { checkCooldown } from '../lib/cooldown';
+import { startHeartbeat } from '../lib/heartbeat';
 
 const COMMANDS: Command[] = [
   resetCommand,
@@ -33,9 +35,22 @@ const COMMANDS: Command[] = [
 const registry = new Collection<string, Command>();
 for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
+// Cooldown durations (in milliseconds)
+const COOLDOWN_DESTRUCTIVE = 30000; // 30 seconds for reset, bypass, cp
+
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];
   const allowedGuildId = process.env['GUILD_ID'];
+
+  // --- OWNER_IDS check: fail-closed ---
+  const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (ownerIds.length === 0) {
+    logger.error('OWNER_IDS is empty or not set — refusing to start to prevent unauthorized access.');
+    return;
+  }
+
+  // Log the configured owners for debugging
+  logger.info({ ownerIds }, 'OWNER_IDS loaded');
 
   if (!token) {
     logger.warn('DISCORD_BOT_TOKEN not set — bot will not start');
@@ -51,10 +66,17 @@ export async function startBot(): Promise<void> {
     allowedMentions: { parse: [] },
   });
 
+  // --- Prefix commands (now gated by OWNER_IDS) ---
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
     if (!message.guildId || message.guildId !== allowedGuildId) return;
+
+    // Check if message author is in OWNER_IDS (fail-closed)
+    if (!ownerIds.includes(message.author.id)) {
+      logger.warn({ userId: message.author.id }, 'Unauthorized user attempted prefix command');
+      return; // silently ignore
+    }
 
     const args = message.content.slice(1).trim().split(/\s+/);
     const command = args.shift()?.toLowerCase();
@@ -101,6 +123,7 @@ export async function startBot(): Promise<void> {
     }
   });
 
+  // --- Slash commands ---
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;
@@ -116,8 +139,19 @@ export async function startBot(): Promise<void> {
     } catch (err) {
       logger.error({ err }, 'Failed to register slash commands');
     }
+
+    // Start heartbeat if configured
+    const heartbeatChannelId = process.env['HEARTBEAT_CHANNEL_ID'];
+    const heartbeatInterval = parseInt(process.env['HEARTBEAT_INTERVAL_HOURS'] ?? '6');
+    if (heartbeatChannelId) {
+      startHeartbeat(client, heartbeatChannelId, heartbeatInterval);
+      logger.info({ channelId: heartbeatChannelId, intervalHours: heartbeatInterval }, 'Heartbeat started');
+    } else {
+      logger.info('No HEARTBEAT_CHANNEL_ID set, heartbeat disabled');
+    }
   });
 
+  // --- Interaction handler with cooldown ---
   client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.guildId !== allowedGuildId) {
@@ -125,9 +159,10 @@ export async function startBot(): Promise<void> {
         return;
       }
 
-      const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (ownerIds.length > 0 && !ownerIds.includes(interaction.user.id)) {
+      // OWNER_IDS check (fail-closed)
+      if (!ownerIds.includes(interaction.user.id)) {
         await interaction.reply({ content: '⛔ You are not authorized.', flags: MessageFlags.Ephemeral });
+        logger.warn({ userId: interaction.user.id, command: interaction.commandName }, 'Unauthorized slash command');
         return;
       }
 
@@ -137,13 +172,25 @@ export async function startBot(): Promise<void> {
         return;
       }
 
+      // Cooldown for destructive commands
+      const destructiveCommands = ['reset', 'bypass', 'cp'];
+      if (destructiveCommands.includes(interaction.commandName)) {
+        const cooldown = checkCooldown(interaction.user.id, COOLDOWN_DESTRUCTIVE);
+        if (!cooldown.allowed) {
+          await interaction.reply({
+            content: `⏳ Please wait ${cooldown.remainingSeconds}s before using this command again.`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+      }
+
       try {
         await command.execute(interaction);
       } catch (err) {
         logger.error({ err, command: interaction.commandName }, 'Command error');
         const msg = { content: '❌ An error occurred.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(
-          );
+        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
         else await interaction.reply(msg);
       }
     } else if (interaction.isButton()) {

