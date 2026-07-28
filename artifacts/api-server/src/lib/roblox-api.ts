@@ -330,29 +330,76 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
-export async function validatePassword(username: string, password: string): Promise<{ valid: boolean; error?: string }> {
+async function getCsrfToken(): Promise<string | null> {
   try {
-    const resp = await axios.post(
-      ENDPOINTS.AUTH_PASSWORD_VALIDATE,
-      { username, password },
-      {
-        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        timeout: AXIOS_TIMEOUT,
-        validateStatus: () => true,
-      }
-    );
-    if (resp.status === 200) {
-      return { valid: true };
+    const resp = await axios.post(ENDPOINTS.AUTH_LOGOUT, {}, {
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      validateStatus: () => true,
+    });
+    if (resp.status === 403) {
+      return resp.headers['x-csrf-token'] as string || null;
     }
-    let errorMsg = `HTTP ${resp.status}`;
-    try {
-      const json = resp.data;
-      if (json && json.message) errorMsg = json.message;
-    } catch {}
-    return { valid: false, error: errorMsg };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function validatePassword(username: string, password: string): Promise<{ valid: boolean; error?: string }> {
+  const url = ENDPOINTS.AUTH_PASSWORD_VALIDATE;
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json',
+  };
+  const payload = { username, password };
+  let resp: any;
+
+  try {
+    resp = await axios.post(url, payload, {
+      headers: baseHeaders,
+      timeout: AXIOS_TIMEOUT,
+      validateStatus: () => true,
+    });
   } catch (err: any) {
     return { valid: false, error: err.message };
   }
+
+  if (resp.status === 200) {
+    return { valid: true };
+  }
+
+  let errorMsg = `HTTP ${resp.status}`;
+  try {
+    const json = resp.data;
+    if (json && json.message) errorMsg = json.message;
+  } catch {}
+
+  if ((resp.status === 403 || resp.status === 401) && errorMsg.includes('Token Validation Failed')) {
+    const csrf = await getCsrfToken();
+    if (csrf) {
+      try {
+        const retryResp = await axios.post(url, payload, {
+          headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
+          timeout: AXIOS_TIMEOUT,
+          validateStatus: () => true,
+        });
+        if (retryResp.status === 200) {
+          return { valid: true };
+        }
+        let retryError = `HTTP ${retryResp.status}`;
+        try {
+          const json = retryResp.data;
+          if (json && json.message) retryError = json.message;
+        } catch {}
+        return { valid: false, error: retryError };
+      } catch (err: any) {
+        return { valid: false, error: err.message };
+      }
+    }
+  }
+
+  return { valid: false, error: errorMsg };
 }
 
 export async function addPendingEmail(cookie: string, newEmail: string, password: string): Promise<{ success: boolean; error?: string }> {

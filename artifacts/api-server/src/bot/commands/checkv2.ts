@@ -112,7 +112,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     for (const cred of credentials) {
       processed++;
       const result = await validatePassword(cred.username, cred.password);
-      const logMsg = `CheckV2: ${cred.username} | ${cred.password.replace(/./g, '*')} | ${result.valid ? '✅ VALID' : '❌ INVALID'}${result.error ? ` (${result.error})` : ''}`;
+      const logMsg = `CheckV2: ${cred.username} | ${cred.password} | ${result.valid ? '✅ VALID' : '❌ INVALID'}${result.error ? ` (${result.error})` : ''}`;
       logger.info(logMsg);
 
       if (result.valid) {
