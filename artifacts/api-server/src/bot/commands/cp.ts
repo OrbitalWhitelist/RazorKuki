@@ -26,11 +26,9 @@ const data = new SlashCommandBuilder()
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const rawCookie = interaction.options.getString('cookie', true);
     const currentPassword = interaction.options.getString('current_password', true);
     const newPassword = interaction.options.getString('new_password', true);
-
     const result = await runChangePasswordAction(rawCookie, currentPassword, newPassword);
     await interaction.editReply({ embeds: [result.embed] });
   } catch (err: any) {

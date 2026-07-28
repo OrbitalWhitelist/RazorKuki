@@ -13,7 +13,7 @@ import type { Command } from './types';
 
 const data = new SlashCommandBuilder()
   .setName('clear')
-  .setDescription('Clear Cookies Format')
+  .setDescription('Clear Cookie Format')
   
   .addStringOption(opt =>
     opt.setName('input')
@@ -24,7 +24,6 @@ const data = new SlashCommandBuilder()
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const raw = interaction.options.getString('input', true);
     const result = await runClearAction(raw);
     if (result.success && result.cleanedCookie) {

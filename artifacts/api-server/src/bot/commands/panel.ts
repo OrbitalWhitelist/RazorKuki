@@ -10,6 +10,8 @@ import {
   MessageFlags,
   type ChatInputCommandInteraction,
   SlashCommandBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from 'discord.js';
 import type { Command } from './types';
 import * as Roblox from '../../lib/roblox-api';
@@ -31,8 +33,10 @@ import {
   runClearAction,
   runChangePasswordAction,
 } from '../../lib/actions';
+import { bypassCommand } from './bypass';
 
 const modalSessions = new Map<string, { action: string }>();
+const noEmailSessions = new Map<string, { cookie: string; password: string }>();
 
 export function buildPanelEmbed() {
   return buildBaseEmbed(
@@ -262,16 +266,45 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
           return;
         }
         break;
-      case 'bypass':
+      case 'bypass': {
         result = await runBypassAction(cookie, password);
-        if (result.success && result.newCookie) {
-          const id = Math.random().toString(36).slice(2, 10);
-          const row = buildCopyButtons(id, 'bypass', result.newCookie, delivery === 'dm');
-          await sendResult({ embeds: [result.embed], components: [row] });
+        if (result.success) {
+          const id = result.newCookie ? Math.random().toString(36).slice(2, 10) : '';
+          const row = result.newCookie ? buildCopyButtons(id, 'bypass', result.newCookie, delivery === 'dm') : undefined;
+          await sendResult({ embeds: [result.embed], components: row ? [row] : [] });
           modalSessions.delete(sessionKey);
           return;
         }
-        break;
+        if (result.noEmail) {
+          const sessionId = Math.random().toString(36).slice(2, 10);
+          noEmailSessions.set(sessionId, { cookie, password });
+          setTimeout(() => noEmailSessions.delete(sessionId), 600000);
+          const embed = buildBaseEmbed(
+            '𖣐 No Email Detected',
+            `✧ **Account:** ${result.username}\n` +
+            `────\n` +
+            `⭑ No verified email found on this account.\n` +
+            `⭑ You can reauthenticate (reset cookie) or change the password.\n` +
+            `⭑ Your credentials were not logged.`
+          );
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`bypass_reauth_${sessionId}`)
+              .setLabel('🔄 Reauth')
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId(`bypass_resetpw_${sessionId}`)
+              .setLabel('🔑 Reset Password')
+              .setStyle(ButtonStyle.Secondary)
+          );
+          await sendResult({ embeds: [embed], components: [row] });
+          modalSessions.delete(sessionKey);
+          return;
+        }
+        await sendResult({ embeds: [result.embed] });
+        modalSessions.delete(sessionKey);
+        return;
+      }
       case 'clear':
         result = await runClearAction(cookie);
         if (result.success && result.cleanedCookie) {
@@ -299,4 +332,39 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   modalSessions.delete(sessionKey);
 }
 
-export const panelCommand: Command = { data, execute, handleSelect, handleModal };
+async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
+  const customId = interaction.customId;
+  if (customId.startsWith('panel_')) {
+    // panel button handling (if any) – currently none
+    return;
+  }
+  // Delegate to bypass command for its buttons
+  if (customId.startsWith('bypass_reauth_') || customId.startsWith('bypass_resetpw_')) {
+    await bypassCommand.handleButton?.(interaction);
+    return;
+  }
+  // Delegate to other button handlers
+  if (customId.startsWith('reset_')) {
+    await resetCommand.handleButton?.(interaction);
+    return;
+  }
+  if (customId.startsWith('clear_')) {
+    await clearCommand.handleButton?.(interaction);
+    return;
+  }
+  if (customId.startsWith('bypass_')) {
+    await bypassCommand.handleButton?.(interaction);
+    return;
+  }
+  if (customId.startsWith('check_')) {
+    await checkCommand.handleButton?.(interaction);
+    return;
+  }
+  if (customId.startsWith('refresh_')) {
+    await refreshCommand.handleButton?.(interaction);
+    return;
+  }
+  await interaction.reply({ content: 'Unknown button.', flags: MessageFlags.Ephemeral });
+}
+
+export const panelCommand: Command = { data, execute, handleSelect, handleButton, handleModal };

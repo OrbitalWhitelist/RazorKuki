@@ -330,7 +330,13 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
-export async function validatePassword(username: string, password: string): Promise<{ valid: boolean; error?: string }> {
+export async function validatePassword(username: string, password: string): Promise<{
+  valid: boolean;
+  error?: string;
+  challenge?: boolean;
+  challengeType?: string;
+  challengeId?: string;
+}> {
   const url = ENDPOINTS.AUTH_LOGIN;
   const baseHeaders = {
     'Content-Type': 'application/json',
@@ -351,12 +357,7 @@ export async function validatePassword(username: string, password: string): Prom
       }
     } catch {}
 
-    const payload = {
-      ctype: 'Username',
-      cvalue: username,
-      password: password,
-    };
-
+    const payload = { ctype: 'Username', cvalue: username, password };
     const headers = { ...baseHeaders };
     if (csrf) headers['X-CSRF-TOKEN'] = csrf;
 
@@ -371,8 +372,15 @@ export async function validatePassword(username: string, password: string): Prom
     }
     if (resp.status === 403) {
       const challengeId = resp.headers['rblx-challenge-id'];
+      const challengeType = resp.headers['rblx-challenge-type'];
       if (challengeId) {
-        return { valid: true, error: 'Challenge required (credentials are correct)' };
+        return {
+          valid: false,
+          challenge: true,
+          challengeType: challengeType || 'unknown',
+          challengeId: challengeId,
+          error: 'Challenge required',
+        };
       }
       return { valid: false, error: `HTTP ${resp.status} - ${resp.data?.errors?.[0]?.message || 'Unknown error'}` };
     }

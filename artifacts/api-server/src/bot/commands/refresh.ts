@@ -13,7 +13,7 @@ import type { Command } from './types';
 
 const data = new SlashCommandBuilder()
   .setName('refresh')
-  .setDescription('Refresh cookie (safe – does not kill other sessions)')
+  .setDescription('Refresh Cookie')
   
   .addStringOption(opt =>
     opt.setName('cookie').setDescription('Insert The Cookies!').setRequired(true)
@@ -22,7 +22,6 @@ const data = new SlashCommandBuilder()
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const rawCookie = interaction.options.getString('cookie', true);
     const result = await runRefreshAction(rawCookie);
     if (result.success && result.newCookie) {

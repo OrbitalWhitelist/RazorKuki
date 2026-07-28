@@ -13,7 +13,7 @@ import type { Command } from './types';
 
 const data = new SlashCommandBuilder()
   .setName('reset')
-  .setDescription('Reset Cookie Session')
+  .setDescription('Reset Current Cookie')
   
   .addStringOption(opt =>
     opt.setName('cookie').setDescription('Insert The Cookies!').setRequired(true)
@@ -22,7 +22,6 @@ const data = new SlashCommandBuilder()
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const rawCookie = interaction.options.getString('cookie', true);
     const result = await runResetAction(rawCookie);
     if (result.success && result.newCookie) {

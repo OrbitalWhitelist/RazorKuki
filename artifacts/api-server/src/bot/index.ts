@@ -37,7 +37,7 @@ const COMMANDS: Command[] = [
 const registry = new Collection<string, Command>();
 for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
-const COOLDOWN_DESTRUCTIVE = 30000;
+const COOLDOWN_DESTRUCTIVE = 5000;
 
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];

