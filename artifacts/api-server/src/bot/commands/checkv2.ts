@@ -59,7 +59,7 @@ function parseCredentials(content: string): Credential[] {
 const data = new SlashCommandBuilder()
   .setName('checkv2')
   .setDescription('Mass check username:password credentials from a .txt file')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  
   .addAttachmentOption((opt) =>
     opt.setName('file')
       .setDescription('A .txt file containing credentials (supports multiple formats)')

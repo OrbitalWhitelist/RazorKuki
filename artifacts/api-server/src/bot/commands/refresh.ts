@@ -14,7 +14,7 @@ import type { Command } from './types';
 const data = new SlashCommandBuilder()
   .setName('refresh')
   .setDescription('Refresh cookie (safe – does not kill other sessions)')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  
   .addStringOption(opt =>
     opt.setName('cookie').setDescription('Insert The Cookies!').setRequired(true)
   ) as SlashCommandBuilder;

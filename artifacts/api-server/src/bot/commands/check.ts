@@ -157,7 +157,7 @@ async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
 const data = new SlashCommandBuilder()
   .setName('check')
   .setDescription('Mass Checking File')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  
   .addAttachmentOption((opt) =>
     opt.setName('file')
       .setDescription('A .txt file containing cookies (supports labeled format)')

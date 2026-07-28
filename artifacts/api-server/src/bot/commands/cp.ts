@@ -12,7 +12,7 @@ import type { Command } from './types';
 const data = new SlashCommandBuilder()
   .setName('cp')
   .setDescription('Change Password Directly')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  
   .addStringOption(opt =>
     opt.setName('cookie').setDescription('Insert The Cookies!').setRequired(true)
   )

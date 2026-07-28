@@ -14,7 +14,7 @@ import type { Command } from './types';
 const data = new SlashCommandBuilder()
   .setName('clear')
   .setDescription('Clear Cookies Format')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  
   .addStringOption(opt =>
     opt.setName('input')
       .setDescription('Insert The Cookies!')
