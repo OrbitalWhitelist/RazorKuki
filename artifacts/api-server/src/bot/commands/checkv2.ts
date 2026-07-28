@@ -16,13 +16,70 @@ import {
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
+type Credential = { username: string; password: string };
+
+function parseCredentials(content: string): Credential[] {
+  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+  const result: Credential[] = [];
+  let current: Partial<Credential> = {};
+
+  for (const line of lines) {
+    // Check for simple colon-separated format: username:password[:ip]
+    if (line.includes(':') && !line.includes(' ')) {
+      const parts = line.split(':');
+      if (parts.length >= 2) {
+        result.push({ username: parts[0].trim(), password: parts[1].trim() });
+      }
+      continue;
+    }
+
+    // Check for labeled format: "username: value" or "password: value" or "ip address: value"
+    const lower = line.toLowerCase();
+    let key: string | null = null;
+    let value: string | null = null;
+
+    if (lower.startsWith('username:')) {
+      key = 'username';
+      value = line.slice('username:'.length).trim();
+    } else if (lower.startsWith('password:')) {
+      key = 'password';
+      value = line.slice('password:'.length).trim();
+    } else if (lower.startsWith('ip address:') || lower.startsWith('ip:')) {
+      key = 'ip';
+      value = line.slice(line.indexOf(':') + 1).trim();
+    }
+
+    if (key && value) {
+      if (key === 'username') {
+        // If we already have a partial credential (with password), push it first
+        if (current.username && current.password) {
+          result.push(current as Credential);
+          current = {};
+        }
+        current.username = value;
+      } else if (key === 'password') {
+        current.password = value;
+      } else if (key === 'ip') {
+        // ignore IP
+      }
+    }
+  }
+
+  // Push the last credential if complete
+  if (current.username && current.password) {
+    result.push(current as Credential);
+  }
+
+  return result;
+}
+
 const data = new SlashCommandBuilder()
   .setName('checkv2')
   .setDescription('Mass check username:password credentials from a .txt file')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addAttachmentOption((opt) =>
     opt.setName('file')
-      .setDescription('A .txt file containing credentials (format: username:password:ip optional)')
+      .setDescription('A .txt file containing credentials (supports username:password or labeled format)')
       .setRequired(true),
   ) as SlashCommandBuilder;
 
@@ -48,32 +105,28 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    const lines = fileContent.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
-      const embed = buildErrorEmbed('✧ **No Lines Found**\n────\n⭑ The file is empty.');
+    const credentials = parseCredentials(fileContent);
+    if (credentials.length === 0) {
+      const embed = buildErrorEmbed('✧ **No Credentials Found**\n────\n⭑ No valid username:password pairs found in the file.');
       await interaction.editReply({ embeds: [embed] });
       return;
     }
 
-    const progressEmbed = buildProgressEmbed(`Scanning ${lines.length} credential(s)...`);
+    const progressEmbed = buildProgressEmbed(`Scanning ${credentials.length} credential(s)...`);
     await interaction.editReply({ embeds: [progressEmbed] });
 
     let validCount = 0;
-    const total = lines.length;
+    const total = credentials.length;
 
-    for (const rawLine of lines) {
-      const parts = rawLine.split(':');
-      if (parts.length < 2) continue;
-      const username = parts[0];
-      const password = parts[1];
-      const result = await validatePassword(username, password);
+    for (const cred of credentials) {
+      const result = await validatePassword(cred.username, cred.password);
       if (!result.valid) continue;
 
       validCount++;
       const embed = buildBaseEmbed(
         '𖣐 Valid Credential',
-        `✧ **Username:** ${username}\n` +
-        `⭑ **Password:** ${'*'.repeat(password.length)}\n` +
+        `✧ **Username:** ${cred.username}\n` +
+        `⭑ **Password:** ${'*'.repeat(cred.password.length)}\n` +
         `⭑ **Status:** ✅ Valid`
       );
       await interaction.followUp({ embeds: [embed], flags: MessageFlags.Ephemeral });
