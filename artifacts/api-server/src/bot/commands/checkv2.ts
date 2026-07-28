@@ -3,7 +3,6 @@ import {
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
   MessageFlags,
-  EmbedBuilder,
 } from 'discord.js';
 import axios from 'axios';
 import { validatePassword } from '../../lib/roblox-api';
@@ -11,56 +10,49 @@ import {
   buildSuccessEmbed,
   buildErrorEmbed,
   buildProgressEmbed,
-  buildBaseEmbed,
 } from '../../lib/embed-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
 type Credential = { username: string; password: string };
 
-function extractCredentialsFromLine(line: string): Credential | null {
-  const usernameMatch = line.match(/username\s*:\s*(\S+)/i);
-  const passwordMatch = line.match(/password\s*:\s*(\S+)/i);
-  if (usernameMatch && passwordMatch) {
-    return { username: usernameMatch[1], password: passwordMatch[1] };
-  }
-  const parts = line.split(':').map(s => s.trim());
-  if (parts.length >= 2) {
-    const username = parts[0];
-    const password = parts[1];
-    if (username && password) {
-      return { username, password };
-    }
-  }
-  return null;
-}
-
 function parseCredentials(content: string): Credential[] {
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
   const result: Credential[] = [];
-  let hasKeyValue = lines.some(l => /username\s*:/i.test(l) && /password\s*:/i.test(l));
-  if (hasKeyValue) {
-    for (const line of lines) {
-      const cred = extractCredentialsFromLine(line);
-      if (cred) result.push(cred);
+  let current: { username: string | null; password: string | null } = { username: null, password: null };
+  let inBlock = false;
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (lower.startsWith('username:')) {
+      const username = line.slice('username:'.length).trim();
+      if (current.username && current.password) {
+        result.push({ username: current.username, password: current.password });
+      }
+      current = { username, password: null };
+      inBlock = true;
+    } else if (lower.startsWith('password:')) {
+      const password = line.slice('password:'.length).trim();
+      current.password = password;
+    } else if (lower.startsWith('ip') && (lower.includes('address:') || lower.startsWith('ip:'))) {
+      if (current.username && current.password) {
+        result.push({ username: current.username, password: current.password });
+        current = { username: null, password: null };
+        inBlock = false;
+      }
+    } else {
+      if (inBlock && !current.username && !lower.includes(':')) {
+        current.username = line;
+      } else if (inBlock && current.username && !current.password && !lower.includes(':')) {
+        current.password = line;
+      }
     }
-    return result;
   }
-  const simpleColonLines = lines.filter(l => l.includes(':') && !l.includes('username') && !l.includes('password'));
-  if (simpleColonLines.length > 0) {
-    for (const line of simpleColonLines) {
-      const cred = extractCredentialsFromLine(line);
-      if (cred) result.push(cred);
-    }
-    return result;
+
+  if (current.username && current.password) {
+    result.push({ username: current.username, password: current.password });
   }
-  for (let i = 0; i + 2 < lines.length; i += 3) {
-    const username = lines[i];
-    const password = lines[i + 1];
-    if (username && password) {
-      result.push({ username, password });
-    }
-  }
+
   return result;
 }
 
@@ -103,6 +95,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
+    logger.info({ count: credentials.length }, 'CheckV2: parsed credentials');
+
     const total = credentials.length;
     const progressEmbed = buildProgressEmbed(`Scanning ${total} credential(s)...`);
     await interaction.editReply({ embeds: [progressEmbed] });
@@ -118,6 +112,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     for (const cred of credentials) {
       processed++;
       const result = await validatePassword(cred.username, cred.password);
+      const logMsg = `CheckV2: ${cred.username} | ${cred.password.replace(/./g, '*')} | ${result.valid ? '✅ VALID' : '❌ INVALID'}${result.error ? ` (${result.error})` : ''}`;
+      logger.info(logMsg);
+
       if (result.valid) {
         validCount++;
         validLines.push(`${cred.username}:${cred.password}`);
