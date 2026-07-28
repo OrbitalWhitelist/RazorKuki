@@ -5,6 +5,7 @@ export const ENDPOINTS = {
   AUTH_SESSION_REFRESH: 'https://auth.roblox.com/v2/session/refresh',
   AUTH_LOGOUT_ALL: 'https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate',
   AUTH_PASSWORD_CHANGE: 'https://auth.roblox.com/v1/user/passwords/change',
+  AUTH_PASSWORD_VALIDATE: 'https://auth.roblox.com/v1/passwords/validate',
   ACCOUNT_EMAIL: 'https://accountsettings.roblox.com/v1/email',
   ACCOUNT_COUNTRY: 'https://accountsettings.roblox.com/v1/account/settings/account-country',
   ECONOMY_CURRENCY: (userId: string) => `https://economy.roblox.com/v1/users/${userId}/currency`,

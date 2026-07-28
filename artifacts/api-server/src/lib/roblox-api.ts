@@ -330,6 +330,31 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
+export async function validatePassword(username: string, password: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    const resp = await axios.post(
+      ENDPOINTS.AUTH_PASSWORD_VALIDATE,
+      { username, password },
+      {
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        timeout: AXIOS_TIMEOUT,
+        validateStatus: () => true,
+      }
+    );
+    if (resp.status === 200) {
+      return { valid: true };
+    }
+    let errorMsg = `HTTP ${resp.status}`;
+    try {
+      const json = resp.data;
+      if (json && json.message) errorMsg = json.message;
+    } catch {}
+    return { valid: false, error: errorMsg };
+  } catch (err: any) {
+    return { valid: false, error: err.message };
+  }
+}
+
 export async function addPendingEmail(cookie: string, newEmail: string, password: string): Promise<{ success: boolean; error?: string }> {
   try {
     const session = await (async () => {

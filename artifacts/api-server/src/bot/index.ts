@@ -17,6 +17,7 @@ import { clearCommand } from './commands/clear';
 import { refreshCommand } from './commands/refresh';
 import { cpCommand } from './commands/cp';
 import { panelCommand } from './commands/panel';
+import { checkv2Command } from './commands/checkv2';
 import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
@@ -30,6 +31,7 @@ const COMMANDS: Command[] = [
   clearCommand,
   refreshCommand,
   cpCommand,
+  checkv2Command,
 ];
 
 const registry = new Collection<string, Command>();

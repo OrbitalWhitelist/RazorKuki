@@ -47,7 +47,8 @@ export function buildPanelEmbed() {
     '• 𝙍𝙚𝙛𝙧𝙚𝙨𝙝 – 𝙍𝙚𝙛𝙧𝙚𝙨𝙝𝙞𝙣𝙜 𝘾𝙤𝙤𝙠𝙞𝙚 \n' +
     '• 𝙍𝙚𝙨𝙚𝙩 – 𝙇𝙤𝙜𝙤𝙪𝙩 𝙊𝙩𝙝𝙚𝙧𝙨 & 𝙍𝙚𝙘𝙞𝙚𝙫𝙚 𝙉𝙚𝙬 𝘾𝙤𝙤𝙠𝙞𝙚 \n' +
     '• 𝘽𝙮𝙥𝙖𝙨𝙨 – 𝙀𝙢𝙖𝙞𝙡𝙨 𝙍𝙚𝙢𝙤𝙫𝙞𝙣𝙜 \n' +
-    '• 𝘾𝙝𝙚𝙘𝙠 – 𝙈𝙖𝙨𝙨 𝘾𝙝𝙚𝙘𝙠𝙨 \n' +
+    '• 𝘾𝙝𝙚𝙘𝙠 – 𝙈𝙖𝙨𝙨 𝘾𝙤𝙤𝙠𝙞𝙚 𝘾𝙝𝙚𝙘𝙠 (𝙪𝙨𝙚 /𝙘𝙝𝙚𝙘𝙠)\n' +
+    '• 𝘾𝙝𝙚𝙘𝙠 𝙑2 – 𝙈𝙖𝙨𝙨 𝘾𝙧𝙚𝙙𝙚𝙣𝙩𝙞𝙖𝙡 𝘾𝙝𝙚𝙘𝙠 (𝙪𝙨𝙚 /𝙘𝙝𝙚𝙘𝙠𝙫2)\n' +
     '• 𝘾𝙡𝙚𝙖𝙧 – 𝘾𝙡𝙚𝙖𝙧 𝘾𝙤𝙤𝙠𝙞𝙚𝙨 \n' +
     '• 𝘾𝙋 – 𝘾𝙝𝙖𝙣𝙜𝙚𝙨 𝙋𝙖𝙨𝙨𝙬𝙤𝙧𝙙 \n' +
     '────────────────────────────',
@@ -63,27 +64,31 @@ export function buildPanelSelect() {
       new StringSelectMenuOptionBuilder()
         .setLabel('🔐 Login / Check')
         .setValue('login')
-        .setDescription('Validate and show account info'),
+        .setDescription('Measuring Account Infos'),
       new StringSelectMenuOptionBuilder()
-        .setLabel('🔄 Refresh (Safe)')
+        .setLabel('🔄 Refresh Cookie')
         .setValue('refresh')
-        .setDescription('Refresh cookie without killing other sessions'),
+        .setDescription('Refresh Cookie'),
       new StringSelectMenuOptionBuilder()
-        .setLabel('🔄 Reset (Kill)')
+        .setLabel('🔄 Reset Cookie')
         .setValue('reset')
-        .setDescription('Kill all sessions and get fresh cookie'),
+        .setDescription('Reset Current Cookie'),
       new StringSelectMenuOptionBuilder()
         .setLabel('⚡ Bypass')
         .setValue('bypass')
-        .setDescription('Attempt age verification bypass'),
+        .setDescription('Attempt Gmail Bypassing (With API)'),
       new StringSelectMenuOptionBuilder()
-        .setLabel('📂 Mass Check')
+        .setLabel('📂 Mass Check (Cookies)')
         .setValue('check')
-        .setDescription('Use /check command for file upload'),
+        .setDescription('W.I.P'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('📂 Mass Check V2 (USN:PW)')
+        .setValue('checkv2')
+        .setDescription('W.I.P'),
       new StringSelectMenuOptionBuilder()
         .setLabel('🧹 Clear Cookie')
         .setValue('clear')
-        .setDescription('Extract raw cookie from messy text'),
+        .setDescription('Clear Cookie Format'),
       new StringSelectMenuOptionBuilder()
         .setLabel('🔑 CP')
         .setValue('cp')
@@ -111,9 +116,10 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   const action = interaction.values[0];
   const userId = interaction.user.id;
 
-  if (action === 'check') {
+  if (action === 'check' || action === 'checkv2') {
+    const commandName = action === 'check' ? '/check' : '/checkv2';
     await interaction.reply({
-      content: '📂 Please use the `/check` command directly to upload a file.\nThis action is not available in the panel.',
+      content: `📂 Please use the \`${commandName}\` command directly to upload a file.\nThis action is not available in the panel.`,
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -156,21 +162,6 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
         .setRequired(true)
         .setPlaceholder('Enter new password');
       fields.push(newPassInput);
-    } else if (action === 'bypass') {
-      const newEmailInput = new TextInputBuilder()
-        .setCustomId('new_email')
-        .setLabel('New Email (optional)')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(false)
-        .setPlaceholder('Leave blank if not needed');
-      fields.push(newEmailInput);
-      const newPassInput = new TextInputBuilder()
-        .setCustomId('new_password')
-        .setLabel('New Password (optional)')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(false)
-        .setPlaceholder('Leave blank if not needed');
-      fields.push(newPassInput);
     }
   } else {
     const cookieInput = new TextInputBuilder()
@@ -195,7 +186,11 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   modal.addComponents(...rows);
 
   modalSessions.set(`${action}_${userId}`, { action });
+
   await interaction.showModal(modal);
+
+  const freshSelect = buildPanelSelect();
+  await interaction.message.edit({ components: [freshSelect] }).catch(() => {});
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
@@ -212,7 +207,6 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   let cookie = '';
   let password = '';
   let newPassword = '';
-  let newEmail = '';
 
   try {
     cookie = interaction.fields.getTextInputValue('cookie') || '';
@@ -222,9 +216,6 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   } catch {}
   try {
     newPassword = interaction.fields.getTextInputValue('new_password') || '';
-  } catch {}
-  try {
-    newEmail = interaction.fields.getTextInputValue('new_email') || '';
   } catch {}
 
   const deliveryRaw = interaction.fields.getTextInputValue('delivery').toUpperCase().trim();
@@ -272,7 +263,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         }
         break;
       case 'bypass':
-        result = await runBypassAction(cookie, password, newEmail, newPassword);
+        result = await runBypassAction(cookie, password);
         if (result.success && result.newCookie) {
           const id = Math.random().toString(36).slice(2, 10);
           const row = buildCopyButtons(id, 'bypass', result.newCookie, delivery === 'dm');
@@ -299,7 +290,6 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
         modalSessions.delete(sessionKey);
         return;
     }
-    // For actions that don't return a new cookie, just send the embed
     await sendResult({ embeds: [result.embed] });
   } catch (err: any) {
     logger.error({ err }, 'Panel modal error');
