@@ -6,6 +6,7 @@ import {
   Routes,
   type Interaction,
   MessageFlags,
+  EmbedBuilder,
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
@@ -22,6 +23,12 @@ import { handleRunPanel, handleSend } from './commands/prefix';
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
 import { startHeartbeat } from '../lib/heartbeat';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
+import fs from 'fs';
+import path from 'path';
+import fetch from 'node-fetch';
 
 const COMMANDS: Command[] = [
   resetCommand,
@@ -58,6 +65,9 @@ export async function startBot(): Promise<void> {
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages],
     allowedMentions: { parse: [] },
   });
+
+  const prefixCooldowns = new Map<string, number>();
+  const PREFIX_COOLDOWN = 30000;
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -111,6 +121,75 @@ export async function startBot(): Promise<void> {
         }
         await handleSend(channel, content);
         await message.reply(`✅ Message sent to ${channel}`);
+      } else if (command === 'checkv2') {
+        const now = Date.now();
+        const last = prefixCooldowns.get(message.author.id);
+        if (last && now - last < PREFIX_COOLDOWN) {
+          const remaining = Math.ceil((PREFIX_COOLDOWN - (now - last)) / 1000);
+          await message.reply(`⏳ Please wait ${remaining}s before using !checkv2 again.`);
+          return;
+        }
+        prefixCooldowns.set(message.author.id, now);
+
+        const attachments = message.attachments;
+        if (attachments.size === 0) {
+          await message.reply('❌ Please attach a `.txt` file containing credentials.');
+          return;
+        }
+        const attachment = attachments.first();
+        if (!attachment.name?.endsWith('.txt') && !attachment.contentType?.includes('text')) {
+          await message.reply('❌ Please attach a `.txt` file.');
+          return;
+        }
+
+        const tmpFile = '/tmp/checkv2_input.txt';
+        const response = await fetch(attachment.url);
+        if (!response.ok) {
+          await message.reply('❌ Failed to download file.');
+          return;
+        }
+        const buffer = await response.buffer();
+        fs.writeFileSync(tmpFile, buffer);
+
+        const scriptPath = path.join(process.cwd(), 'scripts', 'tls-checkv2.py');
+        try {
+          const { stdout, stderr } = await execAsync(`python ${scriptPath} ${tmpFile}`, { timeout: 120000 });
+          if (stderr) console.error('Python stderr:', stderr);
+          const result = JSON.parse(stdout);
+          if (result.error) {
+            await message.reply(`❌ ${result.error}`);
+            return;
+          }
+          const embed = new EmbedBuilder()
+            .setTitle('𖣐 TLS Check V2 Results')
+            .setColor('#FFFFFF')
+            .setDescription(
+              `✧ **Summary**\n` +
+              `────\n` +
+              `⭑ Total: ${result.total}\n` +
+              `⭑ Valid: ${result.valid}\n` +
+              `⭑ Invalid: ${result.invalid}\n` +
+              `⭑ Challenge: ${result.challenge}\n`
+            )
+            .setImage('https://files.catbox.moe/955g15.gif')
+            .setFooter({ text: 'Razor Tools On Top!', iconURL: 'https://files.catbox.moe/955g15.gif' });
+
+          if (result.valid_lines && result.valid_lines.length > 0) {
+            const validText = result.valid_lines.join('\n');
+            const buffer = Buffer.from(validText, 'utf-8');
+            await message.channel.send({
+              embeds: [embed],
+              files: [{ attachment: buffer, name: 'valid_tls.txt' }]
+            });
+          } else {
+            await message.reply({ embeds: [embed] });
+          }
+        } catch (err: any) {
+          console.error('TLS check error:', err);
+          await message.reply('❌ Failed to run TLS check. Ensure Python and curl_cffi are installed.');
+        } finally {
+          try { fs.unlinkSync(tmpFile); } catch {}
+        }
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
