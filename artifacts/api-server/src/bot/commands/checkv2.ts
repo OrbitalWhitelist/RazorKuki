@@ -58,7 +58,7 @@ function parseCredentials(content: string): Credential[] {
 
 const data = new SlashCommandBuilder()
   .setName('checkv2')
-  .setDescription('Mass Credential Check (use /checkv2)')
+  .setDescription('Mass Credential Check')
   .addAttachmentOption((opt) =>
     opt.setName('file')
       .setDescription('A .txt file containing credentials (supports multiple formats)')

