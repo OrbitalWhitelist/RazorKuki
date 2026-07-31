@@ -1,4 +1,3 @@
-// src/lib/roblox-api.ts
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
@@ -331,9 +330,9 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
-export async function getCsrfToken(): Promise<string | null> {
+async function getCsrfTokenWithSession(client: any): Promise<string | null> {
   try {
-    const resp = await axios.post(ENDPOINTS.AUTH_LOGOUT, {}, {
+    const resp = await client.post(ENDPOINTS.AUTH_LOGOUT, {}, {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -341,7 +340,7 @@ export async function getCsrfToken(): Promise<string | null> {
       validateStatus: () => true,
     });
     if (resp.status === 403) {
-      return resp.headers['x-csrf-token'] as string || null;
+      return resp.headers['x-csrf-token'] || null;
     }
     return null;
   } catch {
@@ -356,13 +355,19 @@ export async function validatePassword(username: string, password: string): Prom
   challengeId?: string;
   challengeType?: string;
 }> {
-  const csrf = await getCsrfToken();
+  console.log(`[DEBUG] validatePassword called with username: "${username}", password: "${password}"`);
+  const jar = new CookieJar();
+  const client = wrapper(axios.create({ jar }));
+
+  const csrf = await getCsrfTokenWithSession(client);
   if (!csrf) {
+    console.log('[DEBUG] Failed to get CSRF token');
     return { valid: false, error: 'Failed to get CSRF token' };
   }
+  console.log(`[DEBUG] CSRF token: ${csrf.slice(0, 20)}...`);
 
   try {
-    const resp = await axios.post(
+    const resp = await client.post(
       ENDPOINTS.AUTH_PASSWORD_VALIDATE,
       { username, password },
       {
@@ -375,17 +380,21 @@ export async function validatePassword(username: string, password: string): Prom
         timeout: AXIOS_TIMEOUT,
       }
     );
-
+    console.log(`[DEBUG] Response status: ${resp.status}`);
+    console.log(`[DEBUG] Response data: ${JSON.stringify(resp.data)}`);
     if (resp.status === 200) {
       const data = resp.data;
       if (data.code === 0 && data.message === 'Password is valid') {
+        console.log('[DEBUG] Password is valid');
         return { valid: true };
       }
+      console.log(`[DEBUG] Password invalid: ${data.message}`);
       return { valid: false, error: data.message || 'Invalid password' };
     }
     if (resp.status === 403) {
       const challengeId = resp.headers['rblx-challenge-id'];
       if (challengeId) {
+        console.log(`[DEBUG] Challenge required: ${challengeId}`);
         return {
           valid: false,
           challenge: true,
@@ -394,10 +403,13 @@ export async function validatePassword(username: string, password: string): Prom
           error: 'Challenge required',
         };
       }
+      console.log('[DEBUG] 403 without challenge');
       return { valid: false, error: '403 without challenge' };
     }
+    console.log(`[DEBUG] Unexpected status: ${resp.status}`);
     return { valid: false, error: `HTTP ${resp.status}` };
   } catch (err: any) {
+    console.log(`[DEBUG] Exception: ${err.message}`);
     return { valid: false, error: err.message };
   }
 }
