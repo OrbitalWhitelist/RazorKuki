@@ -330,22 +330,23 @@ export async function checkTwoFactorStatus(cookie: string, userId: string): Prom
   return { enabled: false, mediaType: null };
 }
 
-async function getCsrfTokenWithSession(client: any): Promise<string | null> {
-  try {
-    const resp = await client.post(ENDPOINTS.AUTH_LOGOUT, {}, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      validateStatus: () => true,
-    });
-    if (resp.status === 403) {
-      return resp.headers['x-csrf-token'] || null;
-    }
-    return null;
-  } catch {
-    return null;
+async function getCsrfToken(): Promise<string | null> {
+  const jar = new CookieJar();
+  const client = wrapper(axios.create({ jar }));
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  };
+  for (const url of [ENDPOINTS.AUTH_LOGOUT, ENDPOINTS.AUTH_LOGIN]) {
+    try {
+      const resp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+      if (resp.status === 403) {
+        const token = resp.headers['x-csrf-token'];
+        if (token) return token;
+      }
+    } catch {}
   }
+  return null;
 }
 
 export async function validatePassword(username: string, password: string): Promise<{
@@ -355,58 +356,39 @@ export async function validatePassword(username: string, password: string): Prom
   challengeId?: string;
   challengeType?: string;
 }> {
-  console.log(`[DEBUG] validatePassword called with username: "${username}", password: "${password}"`);
-  const jar = new CookieJar();
-  const client = wrapper(axios.create({ jar }));
-
-  const csrf = await getCsrfTokenWithSession(client);
+  console.log(`[DEBUG] validatePassword: "${username}" "${password}"`);
+  const csrf = await getCsrfToken();
   if (!csrf) {
-    console.log('[DEBUG] Failed to get CSRF token');
+    console.log('[DEBUG] CSRF token missing');
     return { valid: false, error: 'Failed to get CSRF token' };
   }
-  console.log(`[DEBUG] CSRF token: ${csrf.slice(0, 20)}...`);
+  console.log(`[DEBUG] CSRF: ${csrf.slice(0, 20)}...`);
 
+  const jar = new CookieJar();
+  const client = wrapper(axios.create({ jar }));
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'X-CSRF-TOKEN': csrf,
+  };
   try {
-    const resp = await client.post(
-      ENDPOINTS.AUTH_PASSWORD_VALIDATE,
-      { username, password },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'X-CSRF-TOKEN': csrf,
-        },
-        validateStatus: () => true,
-        timeout: AXIOS_TIMEOUT,
-      }
-    );
-    console.log(`[DEBUG] Response status: ${resp.status}`);
-    console.log(`[DEBUG] Response data: ${JSON.stringify(resp.data)}`);
+    const resp = await client.post(ENDPOINTS.AUTH_PASSWORD_VALIDATE, { username, password }, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+    console.log(`[DEBUG] Status: ${resp.status}`);
+    console.log(`[DEBUG] Data: ${JSON.stringify(resp.data)}`);
     if (resp.status === 200) {
       const data = resp.data;
       if (data.code === 0 && data.message === 'Password is valid') {
-        console.log('[DEBUG] Password is valid');
         return { valid: true };
       }
-      console.log(`[DEBUG] Password invalid: ${data.message}`);
       return { valid: false, error: data.message || 'Invalid password' };
     }
     if (resp.status === 403) {
       const challengeId = resp.headers['rblx-challenge-id'];
       if (challengeId) {
-        console.log(`[DEBUG] Challenge required: ${challengeId}`);
-        return {
-          valid: false,
-          challenge: true,
-          challengeId: challengeId,
-          challengeType: resp.headers['rblx-challenge-type'] || 'unknown',
-          error: 'Challenge required',
-        };
+        return { valid: false, challenge: true, challengeId, challengeType: resp.headers['rblx-challenge-type'] || 'unknown', error: 'Challenge required' };
       }
-      console.log('[DEBUG] 403 without challenge');
       return { valid: false, error: '403 without challenge' };
     }
-    console.log(`[DEBUG] Unexpected status: ${resp.status}`);
     return { valid: false, error: `HTTP ${resp.status}` };
   } catch (err: any) {
     console.log(`[DEBUG] Exception: ${err.message}`);
