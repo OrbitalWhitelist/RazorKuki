@@ -80,7 +80,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     embed.addFields(
       { name: '💳 Balance', value: balance, inline: true },
       { name: '📞 Phone', value: phoneStatus, inline: true },
-      { name: '\u200b', value: '\u200b', inline: true }, 
       { name: '🔐 2FA', value: twoStepStatus, inline: false },
       { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
       { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }

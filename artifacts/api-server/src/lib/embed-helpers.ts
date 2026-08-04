@@ -33,7 +33,7 @@ export function buildAccountEmbed(
   username: string,
   displayName: string | null,
   userId: number,
-  ageDays: number,
+  ageString: string,
   robux: number,
   summary: { incoming: number; outgoing: number },
   country: string,
@@ -41,7 +41,6 @@ export function buildAccountEmbed(
   parentalStatus: string,
   thumbnail?: string | null
 ): EmbedBuilder {
-  const ageText = ageDays === -1 ? 'Unknown' : `${ageDays} days`;
   const embed = buildBaseEmbed(
     '𖣐 Cookie Valid .ᐟ',
     `✧ **User Information**\n` +
@@ -50,7 +49,7 @@ export function buildAccountEmbed(
     `⭑ **Display Name:** ${displayName || username}\n` +
     `⭑ **User ID:** ${userId}\n` +
     `⭑ **Country:** ${country}\n` +
-    `⭑ **Account Age:** ${ageText}\n` +
+    `⭑ **Account Age:** ${ageString}\n` +
     `⭑ **Robux:** ${robux.toLocaleString()}\n` +
     `────\n` +
     `✧ **Robux Summary (Year)**\n` +
