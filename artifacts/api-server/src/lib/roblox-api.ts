@@ -226,15 +226,17 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
   }
 }
 
-export async function getUserAge(userId: number): Promise<number> {
+export async function getUserAge(userId: number): Promise<{ days: number; years: number; createdYear: number }> {
   try {
     const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
     const created = new Date(resp.data.created);
     const now = new Date();
-    const diff = now.getTime() - created.getTime();
-    return Math.floor(diff / (1000 * 3600 * 24));
+    const diffMs = now.getTime() - created.getTime();
+    const days = Math.floor(diffMs / (1000 * 3600 * 24));
+    const years = Math.floor(days / 365);
+    return { days, years, createdYear: created.getFullYear() };
   } catch {
-    return -1;
+    return { days: -1, years: -1, createdYear: 0 };
   }
 }
 
@@ -383,6 +385,26 @@ export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | 
     }
   } catch {}
   return { rap: null, premium: false };
+}
+
+export async function fetchAgeVerification(cookie: string): Promise<{ isVerified: boolean; verifiedAge: number | null }> {
+  try {
+    const resp = await axios.get('https://apis.roblox.com/age-verification-service/v1/age-verification/verified-age', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        Cookie: `.ROBLOSECURITY=${cookie}`,
+      },
+      validateStatus: () => true,
+      timeout: AXIOS_TIMEOUT,
+    });
+    if (resp.status === 200 && resp.data?.isVerified !== undefined) {
+      return {
+        isVerified: resp.data.isVerified,
+        verifiedAge: resp.data.isVerified ? resp.data.verifiedAge ?? null : null,
+      };
+    }
+  } catch {}
+  return { isVerified: false, verifiedAge: null };
 }
 
 export async function getCsrfToken(): Promise<string | null> {

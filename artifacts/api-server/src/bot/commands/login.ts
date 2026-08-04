@@ -34,14 +34,21 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     }
 
     const userId = String(validation.userId);
-    const [credit, twoStep, phone, rap] = await Promise.all([
+    const [credit, twoStep, phone, rap, ageData, ageVerification] = await Promise.all([
       Roblox.fetchCreditBalance(cookie),
       Roblox.fetchTwoStepConfig(cookie, userId),
       Roblox.fetchPhoneInfo(cookie),
       Roblox.fetchRolimonsRAP(userId),
+      Roblox.getUserAge(validation.userId),
+      Roblox.fetchAgeVerification(cookie),
     ]);
 
-    const age = await Roblox.getUserAge(validation.userId);
+    const accountAgeBase = `${ageData.years} Years, ${ageData.days % 365} Days (Created ${ageData.createdYear})`;
+    const verificationLine = ageVerification.isVerified
+      ? `✅ Age Verified: ${ageVerification.verifiedAge} years`
+      : '❌ Age not verified';
+    const ageString = `${accountAgeBase}\n${verificationLine}`;
+
     const robux = await Roblox.fetchRobux(cookie, userId);
     const summary = await Roblox.fetchTransactionTotals(cookie, userId);
     const country = await Roblox.fetchCountry(cookie);
@@ -61,19 +68,24 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       validation.username,
       validation.displayName || null,
       validation.userId,
-      age,
+      ageString,
       robux,
       summary,
       country,
       emailStatus,
       parental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
       thumb
-    ).addFields(
-      { name: '💰 Balance', value: balance, inline: true },
-      { name: '📞 Phone', value: phoneStatus, inline: true },
-      { name: '🔐 2FA', value: twoStepStatus, inline: false },
-      { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
-      { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
+    );
+
+    embed.addFields(
+      { name: '══════ • 💰 Balance • ══════', value: ' ', inline: false },
+      { name: '**💳 Credit Balance**', value: balance, inline: true },
+      { name: '**📞 Phone**', value: phoneStatus, inline: true },
+      { name: '══════ • 🔐 Security • ══════', value: ' ', inline: false },
+      { name: '**🔐 2FA**', value: twoStepStatus, inline: false },
+      { name: '══════ • 📈 Statistics • ══════', value: ' ', inline: false },
+      { name: '**📈 RAP**', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
+      { name: '**⭐ Premium**', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
     );
 
     await interaction.editReply({ embeds: [embed] });
