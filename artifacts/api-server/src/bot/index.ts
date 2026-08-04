@@ -39,6 +39,13 @@ for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
 const COOLDOWN_DESTRUCTIVE = 5000;
 
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({ reason, promise }, 'Unhandled Rejection');
+});
+process.on('uncaughtException', (error) => {
+  logger.error({ error }, 'Uncaught Exception');
+});
+
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];
 
@@ -58,6 +65,9 @@ export async function startBot(): Promise<void> {
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages],
     allowedMentions: { parse: [] },
   });
+
+  const prefixCooldowns = new Map<string, number>();
+  const PREFIX_COOLDOWN = 30000;
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -212,7 +222,9 @@ export async function startBot(): Promise<void> {
     }
   });
 
-  client.on('error', (err) => logger.error({ err }, 'Client error'));
+  client.on('error', (err) => {
+    logger.error({ err }, 'Client error');
+  });
   client.on('shardDisconnect', () => {
     botState.online = false;
     logger.warn('Bot disconnected');

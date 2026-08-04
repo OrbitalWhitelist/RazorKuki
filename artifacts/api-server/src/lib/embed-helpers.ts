@@ -22,7 +22,7 @@ export function buildInvalidCookieEmbed(): EmbedBuilder {
 }
 
 export function buildIpLimitEmbed(): EmbedBuilder {
-  return buildErrorEmbed('✧ **IP Limits, Try Again**\n────\n⭑ Too many requests to Roblox servers. Please wait a moment and try again.');
+  return buildErrorEmbed('✧ **IP Limits, Try Again**\n────\n⭑ Too many requests. Please wait a moment and try again.');
 }
 
 export function buildProgressEmbed(step: string): EmbedBuilder {
@@ -42,7 +42,8 @@ export function buildAccountEmbed(
   thumbnail?: string | null
 ): EmbedBuilder {
   const ageText = ageDays === -1 ? 'Unknown' : `${ageDays} days`;
-  const embed = buildBaseEmbed('𖣐 Cookie Valid .ᐟ',
+  const embed = buildBaseEmbed(
+    '𖣐 Cookie Valid .ᐟ',
     `✧ **User Information**\n` +
     `────\n` +
     `⭑ **Username:** ${username}\n` +
@@ -50,7 +51,7 @@ export function buildAccountEmbed(
     `⭑ **User ID:** ${userId}\n` +
     `⭑ **Country:** ${country}\n` +
     `⭑ **Account Age:** ${ageText}\n` +
-    ` **Robux:** ${robux.toLocaleString()}\n` +
+    `⭑ **Robux:** ${robux.toLocaleString()}\n` +
     `────\n` +
     `✧ **Robux Summary (Year)**\n` +
     `────\n` +
@@ -66,14 +67,4 @@ export function buildAccountEmbed(
   );
   if (thumbnail) embed.setThumbnail(thumbnail);
   return embed;
-}
-
-export function buildBypassNoMailEmbed(username: string): EmbedBuilder {
-  return buildSuccessEmbed(
-    '✧ **Bypass Result**\n' +
-    `────\n` +
-    `⭑ **Status:** Success, No Mails Detected!\n` +
-    `⭑ **Username:** ${username}\n` +
-    `⭑ Your credentials were not logged.`
-  );
 }
