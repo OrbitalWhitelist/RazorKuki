@@ -43,11 +43,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       Roblox.fetchAgeVerification(cookie),
     ]);
 
-    const accountAgeBase = `${ageData.years} Years, ${ageData.days % 365} Days (Created ${ageData.createdYear})`;
-    const verificationLine = ageVerification.isVerified
-      ? `✅ Age Verified: ${ageVerification.verifiedAge} years`
-      : '❌ Age not verified';
-    const ageString = `${accountAgeBase}\n${verificationLine}`;
+    const displayedAge = ageVerification.isVerified && ageVerification.verifiedAge !== null
+      ? ageVerification.verifiedAge
+      : ageData.years;
+
+    const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${displayedAge} Y.O (${ageVerification.isVerified ? 'Verified' : 'Unverified'})`;
 
     const robux = await Roblox.fetchRobux(cookie, userId);
     const summary = await Roblox.fetchTransactionTotals(cookie, userId);
@@ -78,14 +78,12 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     );
 
     embed.addFields(
-      { name: '══════ • 💰 Balance • ══════', value: ' ', inline: false },
-      { name: '**💳 Credit Balance**', value: balance, inline: true },
-      { name: '**📞 Phone**', value: phoneStatus, inline: true },
-      { name: '══════ • 🔐 Security • ══════', value: ' ', inline: false },
-      { name: '**🔐 2FA**', value: twoStepStatus, inline: false },
-      { name: '══════ • 📈 Statistics • ══════', value: ' ', inline: false },
-      { name: '**📈 RAP**', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
-      { name: '**⭐ Premium**', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
+      { name: '💳 Balance', value: balance, inline: true },
+      { name: '📞 Phone', value: phoneStatus, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }, 
+      { name: '🔐 2FA', value: twoStepStatus, inline: false },
+      { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
+      { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
     );
 
     await interaction.editReply({ embeds: [embed] });
