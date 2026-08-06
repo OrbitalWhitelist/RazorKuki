@@ -17,8 +17,7 @@ import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { refreshCommand } from './commands/refresh';
 import { checkv2Command } from './commands/checkv2';
-import { panelCommand } from './commands/panel';
-import { ownerCommand } from './commands/owner';
+import { panelCommand, buildPanelEmbed, buildPanelSelect } from './commands/panel';
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
 import { startHeartbeat } from '../lib/heartbeat';
@@ -32,7 +31,6 @@ const COMMANDS: Command[] = [
   refreshCommand,
   checkv2Command,
   panelCommand,
-  ownerCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -71,7 +69,7 @@ export async function startBot(): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
   if (ownerIds.length === 0) {
-    logger.warn('OWNER_IDS is empty – owner commands will be disabled.');
+    logger.warn('OWNER_IDS is empty – prefix commands (!runpanel, !send, !update, !restart) will be disabled.');
   } else {
     logger.info({ ownerIds }, 'OWNER_IDS loaded');
   }
@@ -90,11 +88,80 @@ export async function startBot(): Promise<void> {
     allowedMentions: { parse: [] },
   });
 
+  client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith('!')) return;
+    if (!message.guildId) return;
+
+    if (ownerIds.length === 0) return;
+    if (!ownerIds.includes(message.author.id)) return;
+
+    const args = message.content.slice(1).trim().split(/\s+/);
+    const command = args.shift()?.toLowerCase();
+    if (!command) return;
+
+    try {
+      if (command === 'runpanel') {
+        const channelMention = args[0];
+        if (!channelMention) {
+          await message.reply('❌ Please provide a channel mention, e.g. `!runpanel #channel`');
+          return;
+        }
+        const channelId = channelMention.replace(/[<#>]/g, '');
+        const channel = message.guild?.channels.cache.get(channelId);
+        if (!channel || !channel.isTextBased()) {
+          await message.reply('❌ Invalid channel.');
+          return;
+        }
+        await channel.send({
+          embeds: [buildPanelEmbed()],
+          components: [buildPanelSelect()],
+        });
+        await message.reply(`✅ Panel sent to ${channel}`);
+      } else if (command === 'send') {
+        const channelMention = args[0];
+        if (!channelMention) {
+          await message.reply('❌ Please provide a channel mention, e.g. `!send #channel Hello`');
+          return;
+        }
+        const channelId = channelMention.replace(/[<#>]/g, '');
+        const channel = message.guild?.channels.cache.get(channelId);
+        if (!channel || !channel.isTextBased()) {
+          await message.reply('❌ Invalid channel.');
+          return;
+        }
+        const content = args.slice(1).join(' ');
+        if (!content) {
+          await message.reply('❌ Please provide a message to send.');
+          return;
+        }
+        await channel.send({ content });
+        await message.reply(`✅ Message sent to ${channel}`);
+      } else if (command === 'update') {
+        await message.reply('⏳ Pulling updates and rebuilding...');
+        try {
+          const { execSync } = require('child_process');
+          execSync('git pull && pnpm run build', { stdio: 'inherit' });
+          await message.reply('✅ Code updated. Restarting...');
+          process.exit(0);
+        } catch (e: any) {
+          await message.reply(`❌ Update failed: ${e.message}`);
+        }
+      } else if (command === 'restart') {
+        await message.reply('🔁 Restarting...');
+        process.exit(0);
+      }
+    } catch (err) {
+      logger.error({ err, command }, 'Prefix command error');
+      await message.reply('❌ An error occurred while processing your command.');
+    }
+  });
+
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;
     botState.readyAt = new Date();
-    logger.info({ tag: c.user.tag }, '[+] Razor Tools Is Serving Your Master..');
+    logger.info({ tag: c.user.tag }, '⚔️  Razor Tools bot is online');
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {

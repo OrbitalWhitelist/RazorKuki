@@ -9,7 +9,7 @@ export function startHeartbeat(client: Client, channelId: string, intervalHours:
     try {
       const channel = client.channels.cache.get(channelId) as TextChannel;
       if (channel) {
-        await channel.send('🟢 Razor Tools heartbeat – bot is alive and running.');
+        await channel.send('Kerja Roda lagi dan lagi..');
       } else {
         logger.warn('Heartbeat channel not found');
       }
