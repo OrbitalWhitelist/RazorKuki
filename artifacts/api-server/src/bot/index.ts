@@ -6,6 +6,7 @@ import {
   Routes,
   type Interaction,
   MessageFlags,
+  ChannelType,
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
@@ -15,10 +16,9 @@ import { checkCommand } from './commands/check';
 import { bypassCommand } from './commands/bypass';
 import { clearCommand } from './commands/clear';
 import { refreshCommand } from './commands/refresh';
-import { cpCommand } from './commands/cp';
 import { checkv2Command } from './commands/checkv2';
 import { panelCommand } from './commands/panel';
-import { handleRunPanel, handleSend } from './commands/prefix';
+import { ownerCommand } from './commands/owner';
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
 import { startHeartbeat } from '../lib/heartbeat';
@@ -30,8 +30,9 @@ const COMMANDS: Command[] = [
   bypassCommand,
   clearCommand,
   refreshCommand,
-  cpCommand,
   checkv2Command,
+  panelCommand,
+  ownerCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -46,93 +47,54 @@ process.on('uncaughtException', (error) => {
   logger.error({ error }, 'Uncaught Exception');
 });
 
+function logCommandUsage(
+  userTag: string,
+  userId: string,
+  commandName: string,
+  options: Record<string, string>,
+  channelId: string
+) {
+  logger.info({
+    userTag,
+    userId,
+    command: commandName,
+    options,
+    channelId,
+  }, `[COMMAND] ${userTag} used /${commandName}`);
+}
+
 export async function startBot(): Promise<void> {
   const token = process.env['DISCORD_BOT_TOKEN'];
 
-  const ownerIds = (process.env['OWNER_IDS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ownerIds = (process.env['OWNER_IDS'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (ownerIds.length === 0) {
-    logger.warn('OWNER_IDS is empty — prefix commands (!runpanel, !send) will be disabled.');
+    logger.warn('OWNER_IDS is empty – owner commands will be disabled.');
   } else {
-    logger.info({ ownerIds }, 'OWNER_IDS loaded for prefix commands');
+    logger.info({ ownerIds }, 'OWNER_IDS loaded');
   }
 
   if (!token) {
-    logger.warn('DISCORD_BOT_TOKEN not set — bot will not start');
+    logger.warn('DISCORD_BOT_TOKEN not set – bot will not start');
     return;
   }
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMessages,
+    ],
     allowedMentions: { parse: [] },
-  });
-
-  const prefixCooldowns = new Map<string, number>();
-  const PREFIX_COOLDOWN = 30000;
-
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.content.startsWith('!')) return;
-    if (!message.guildId) return;
-
-    if (ownerIds.length === 0) {
-      logger.warn('Prefix command ignored because OWNER_IDS is empty');
-      return;
-    }
-    if (!ownerIds.includes(message.author.id)) {
-      logger.warn({ userId: message.author.id }, 'Unauthorized user attempted prefix command');
-      return;
-    }
-
-    const args = message.content.slice(1).trim().split(/\s+/);
-    const command = args.shift()?.toLowerCase();
-    if (!command) return;
-
-    try {
-      if (command === 'runpanel') {
-        const channelMention = args[0];
-        if (!channelMention) {
-          await message.reply('❌ Please provide a channel mention, e.g. `!runpanel #channel`');
-          return;
-        }
-        const channelId = channelMention.replace(/[<#>]/g, '');
-        const channel = message.guild?.channels.cache.get(channelId);
-        if (!channel || !channel.isTextBased()) {
-          await message.reply('❌ Invalid channel.');
-          return;
-        }
-        await handleRunPanel(channel);
-        await message.reply(`✅ Panel sent to ${channel}`);
-      } else if (command === 'send') {
-        const channelMention = args[0];
-        if (!channelMention) {
-          await message.reply('❌ Please provide a channel mention, e.g. `!send #channel Hello`');
-          return;
-        }
-        const channelId = channelMention.replace(/[<#>]/g, '');
-        const channel = message.guild?.channels.cache.get(channelId);
-        if (!channel || !channel.isTextBased()) {
-          await message.reply('❌ Invalid channel.');
-          return;
-        }
-        const content = args.slice(1).join(' ');
-        if (!content) {
-          await message.reply('❌ Please provide a message to send.');
-          return;
-        }
-        await handleSend(channel, content);
-        await message.reply(`✅ Message sent to ${channel}`);
-      }
-    } catch (err) {
-      logger.error({ err, command }, 'Prefix command error');
-      await message.reply('❌ An error occurred while processing your command.');
-    }
   });
 
   client.once('clientReady', async (c) => {
     botState.online = true;
     botState.tag = c.user.tag;
     botState.readyAt = new Date();
-    logger.info({ tag: c.user.tag }, '⚔️  Razor Tools bot is online');
+    logger.info({ tag: c.user.tag }, '[+] Razor Tools Is Serving Your Master..');
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
@@ -152,7 +114,31 @@ export async function startBot(): Promise<void> {
     } else {
       logger.info('No HEARTBEAT_CHANNEL_ID set, heartbeat disabled');
     }
+
+    const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
+    if (statusChannelId) {
+      try {
+        const channel = await client.channels.fetch(statusChannelId);
+        if (channel && channel.type === ChannelType.GuildVoice) {
+          await channel.setName('🟢 Razor Bot Online').catch(() => {});
+          logger.info('Status voice channel updated');
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to set status voice channel');
+      }
+    }
   });
+
+  const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
+  if (statusChannelId) {
+    process.once('SIGINT', async () => {
+      const channel = await client.channels.fetch(statusChannelId).catch(() => null);
+      if (channel && channel.type === ChannelType.GuildVoice) {
+        await channel.setName('🔴 Razor Bot Offline').catch(() => {});
+      }
+      process.exit();
+    });
+  }
 
   client.on('interactionCreate', async (interaction: Interaction) => {
     if (!interaction.inGuild()) {
@@ -172,7 +158,7 @@ export async function startBot(): Promise<void> {
         return;
       }
 
-      const destructiveCommands = ['reset', 'bypass', 'cp'];
+      const destructiveCommands = ['reset', 'bypass'];
       if (destructiveCommands.includes(interaction.commandName)) {
         const cooldown = checkCooldown(interaction.user.id, COOLDOWN_DESTRUCTIVE);
         if (!cooldown.allowed) {
@@ -183,6 +169,21 @@ export async function startBot(): Promise<void> {
           return;
         }
       }
+
+      const options: Record<string, string> = {};
+      if (interaction.options.data) {
+        for (const opt of interaction.options.data) {
+          options[opt.name] = opt.value?.toString() ?? '';
+        }
+      }
+
+      logCommandUsage(
+        interaction.user.tag,
+        interaction.user.id,
+        interaction.commandName,
+        options,
+        interaction.channelId
+      );
 
       try {
         await command.execute(interaction);
