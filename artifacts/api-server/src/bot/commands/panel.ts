@@ -81,7 +81,7 @@ export function buildPanelSelect() {
       new StringSelectMenuOptionBuilder()
         .setLabel('📂 Mass Check (Cookies)')
         .setValue('check')
-        .setDescription('Use /check'),
+        .setDescription('W.I.P'),
       new StringSelectMenuOptionBuilder()
         .setLabel('📂 Mass Check V2 (USN:PW)')
         .setValue('checkv2')
@@ -116,7 +116,7 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
   if (action === 'check' || action === 'checkv2') {
     const commandName = action === 'check' ? '/check' : '/checkv2';
     await interaction.reply({
-      content: `📂 Please use the \`${commandName}\` command directly.`,
+      content: `Dah dibilangin W.I.P Ngeyel kontol`,
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -144,7 +144,7 @@ async function handleSelect(interaction: MessageComponentInteraction): Promise<v
       .setRequired(true)
       .setPlaceholder('Insert here...');
     fields.push(cookieInput);
-    // No password input
+    
   } else {
     const cookieInput = new TextInputBuilder()
       .setCustomId('cookie')
