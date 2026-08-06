@@ -34,20 +34,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     }
 
     const userId = String(validation.userId);
-    const [credit, twoStep, phone, rap, ageData, ageVerification] = await Promise.all([
+    const [credit, twoStep, phone, rap, ageData, ageGroup] = await Promise.all([
       Roblox.fetchCreditBalance(cookie),
       Roblox.fetchTwoStepConfig(cookie, userId),
       Roblox.fetchPhoneInfo(cookie),
       Roblox.fetchRolimonsRAP(userId),
       Roblox.getUserAge(validation.userId),
-      Roblox.fetchAgeVerification(cookie),
+      Roblox.fetchAgeGroup(cookie),
     ]);
 
-    const displayedAge = ageVerification.isVerified && ageVerification.verifiedAge !== null
-      ? ageVerification.verifiedAge
-      : ageData.years;
-
-    const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${displayedAge} Y.O (${ageVerification.isVerified ? 'Verified' : 'Unverified'})`;
+    const accountAgeBase = `Created ${ageData.createdYear} (${ageData.days}D)`;
+    const ageString = `${accountAgeBase} - ${ageGroup}`;
 
     const robux = await Roblox.fetchRobux(cookie, userId);
     const summary = await Roblox.fetchTransactionTotals(cookie, userId);
@@ -60,9 +57,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
     else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
 
-    const twoStepStatus = `📧 ${twoStep.email ? '✅' : '❌'} Email 2FA | 🔐 ${twoStep.authenticator ? '✅' : '❌'} Authenticator`;
-    const phoneStatus = phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone';
-    const balance = `${credit.balance} ${credit.currency}`;
+    const balance = `\`\`\`${credit.balance} ${credit.currency}\`\`\``;
+    const phoneStatus = `\`\`\`${phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone'}\`\`\``;
+    const twoStepStatus = `\`\`\`📧 Email 2FA ${twoStep.email ? '✅' : '❌'} | 🔐 Authenticator ${twoStep.authenticator ? '✅' : '❌'}\`\`\``;
+    const rapValue = `\`\`\`${rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE'}\`\`\``;
+    const premiumValue = `\`\`\`${rap.premium ? '✅ Yes' : '❌ No'}\`\`\``;
 
     const embed = buildAccountEmbed(
       validation.username,
@@ -81,8 +80,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       { name: '💳 Balance', value: balance, inline: true },
       { name: '📞 Phone', value: phoneStatus, inline: true },
       { name: '🔐 2FA', value: twoStepStatus, inline: false },
-      { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
-      { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
+      { name: '📈 RAP', value: rapValue, inline: true },
+      { name: '⭐ Premium', value: premiumValue, inline: true }
     );
 
     await interaction.editReply({ embeds: [embed] });

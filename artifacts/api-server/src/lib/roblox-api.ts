@@ -387,24 +387,29 @@ export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | 
   return { rap: null, premium: false };
 }
 
-export async function fetchAgeVerification(cookie: string): Promise<{ isVerified: boolean; verifiedAge: number | null }> {
+const AGE_GROUP_MAP: Record<string, string> = {
+  'Label.AgeGroupUnder13': 'Under 13',
+  'Label.AgeGroup13To15': '13-15',
+  'Label.AgeGroup16To17': '16-17',
+  'Label.AgeGroup18To20': '18-20',
+  'Label.AgeGroupOver21': '21+',
+};
+
+export async function fetchAgeGroup(cookie: string): Promise<string> {
   try {
-    const resp = await axios.get('https://apis.roblox.com/age-verification-service/v1/age-verification/verified-age', {
+    const resp = await axios.get('https://apis.roblox.com/user-settings-api/v1/account-insights/age-group', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         Cookie: `.ROBLOSECURITY=${cookie}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       validateStatus: () => true,
-      timeout: AXIOS_TIMEOUT,
+      timeout: 10000,
     });
-    if (resp.status === 200 && resp.data?.isVerified !== undefined) {
-      return {
-        isVerified: resp.data.isVerified,
-        verifiedAge: resp.data.isVerified ? resp.data.verifiedAge ?? null : null,
-      };
+    if (resp.status === 200 && resp.data?.ageGroupTranslationKey) {
+      return AGE_GROUP_MAP[resp.data.ageGroupTranslationKey] || 'Unknown';
     }
   } catch {}
-  return { isVerified: false, verifiedAge: null };
+  return 'Unknown';
 }
 
 export async function getCsrfToken(): Promise<string | null> {
@@ -524,7 +529,7 @@ export async function changePassword(
   }
 }
 
-export async function updateBirthdate(cookie: string, birthdate: string, password?: string): Promise<{ success: boolean; status: number; message?: string }> {
+export async function updateBirthdate(cookie: string, day: number, month: number, year: number, password?: string): Promise<{ success: boolean; status: number; message?: string }> {
   try {
     const csrf = await getCsrfToken();
     if (!csrf) {
@@ -533,13 +538,15 @@ export async function updateBirthdate(cookie: string, birthdate: string, passwor
     const jar = new CookieJar();
     await jar.setCookie(`.ROBLOSECURITY=${cookie}; Domain=.roblox.com; Path=/`, 'https://users.roblox.com');
     const client = wrapper(axios.create({ jar }));
-    const payload: any = { birthdate };
+    const payload: any = { birthDay: day, birthMonth: month, birthYear: year };
     if (password) payload.password = password;
     const resp = await client.post('https://users.roblox.com/v1/birthdate', payload, {
       headers: {
         'X-CSRF-TOKEN': csrf,
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': 'https://www.roblox.com',
+        'Referer': 'https://www.roblox.com/',
       },
       validateStatus: () => true,
     });
