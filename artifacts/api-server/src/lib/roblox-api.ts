@@ -387,15 +387,14 @@ export async function fetchRolimonsRAP(userId: string): Promise<{ rap: number | 
   return { rap: null, premium: false };
 }
 
-const AGE_GROUP_MAP: Record<string, string> = {
-  'Label.AgeGroupUnder13': 'Under 13',
-  'Label.AgeGroup13To15': '13-15',
-  'Label.AgeGroup16To17': '16-17',
-  'Label.AgeGroup18To20': '18-20',
-  'Label.AgeGroupOver21': '21+',
-};
-
 export async function fetchAgeGroup(cookie: string): Promise<string> {
+  const AGE_GROUP_MAP: Record<string, string> = {
+    'Label.AgeGroupUnder13': 'Under 13',
+    'Label.AgeGroup13To15': '13-15',
+    'Label.AgeGroup16To17': '16-17',
+    'Label.AgeGroup18To20': '18-20',
+    'Label.AgeGroupOver21': '21+',
+  };
   try {
     const resp = await axios.get('https://apis.roblox.com/user-settings-api/v1/account-insights/age-group', {
       headers: {
@@ -611,4 +610,76 @@ export async function bypassAgeVerification(cookie: string, password: string): P
     }
     return { success: false, message: err.message || 'Unknown error' };
   }
+}
+
+// ---- New additions for pending Robux, rare items, gamepasses ----
+
+export async function fetchPendingRobux(cookie: string, userId: string): Promise<number> {
+  try {
+    const resp = await axios.get(
+      `https://apis.roblox.com/transaction-records/v1/users/${userId}/transaction-totals`,
+      {
+        params: { usedTypes: 2506784, timeFrame: 'Year', transactionType: 'summary' },
+        headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+        timeout: 10000,
+        validateStatus: () => true,
+      }
+    );
+    if (resp.status === 200 && resp.data?.pendingRobuxTotal !== undefined) {
+      return resp.data.pendingRobuxTotal;
+    }
+  } catch {}
+  return 0;
+}
+
+const RARE_ASSETS: Record<string, number> = {
+  'Headless Horseman': 15093053680,
+  'Korblox Deathspeaker': 139607673,
+  'Korblox Deathwalker': 16580491126,
+};
+
+export async function getOwnedRareItems(cookie: string, userId: string): Promise<string[]> {
+  const owned: string[] = [];
+  for (const [name, assetId] of Object.entries(RARE_ASSETS)) {
+    try {
+      const resp = await axios.get(
+        `https://inventory.roblox.com/v1/users/${userId}/items/Asset/${assetId}`,
+        { headers: { Cookie: `.ROBLOSECURITY=${cookie}` }, timeout: 10000, validateStatus: () => true }
+      );
+      if (resp.status === 200 && Array.isArray(resp.data?.data) && resp.data.data.length > 0) {
+        owned.push(name);
+      }
+    } catch {}
+  }
+  return owned;
+}
+
+export async function getGamepasses(universeId: number): Promise<Array<{ id: number; name: string; price: number | null }>> {
+  try {
+    const resp = await axios.get(`https://games.roblox.com/v1/games/${universeId}/game-passes`, { timeout: 10000, validateStatus: () => true });
+    if (resp.status === 200 && Array.isArray(resp.data?.data)) {
+      return resp.data.data.map((gp: any) => ({ id: gp.id, name: gp.name, price: gp.price ?? null }));
+    }
+  } catch {}
+  return [];
+}
+
+export async function checkOwnsGamepass(cookie: string, userId: string, gamepassId: number): Promise<boolean> {
+  try {
+    const resp = await axios.get(`https://inventory.roblox.com/v1/users/${userId}/items/GamePass/${gamepassId}`, {
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      timeout: 10000,
+      validateStatus: () => true,
+    });
+    return resp.status === 200 && Array.isArray(resp.data?.data) && resp.data.data.length > 0;
+  } catch {}
+  return false;
+}
+
+export async function getUniverseId(placeId: number): Promise<number | null> {
+  try {
+    const resp = await axios.get(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`, { timeout: 10000, validateStatus: () => true });
+    if (resp.status === 200 && resp.data?.universeId) return resp.data.universeId;
+  } catch {}
+  return null;
 }
