@@ -207,22 +207,21 @@ export async function startBot(): Promise<void> {
     });
   }
 
-  client.on('interactionCreate', async (interaction: Interaction) => {
-    if (!interaction.inGuild()) {
-      if (interaction.isButton() && interaction.customId.startsWith('copy_')) {
-        const { handleCopyButtonClick } = await import('../lib/button-helpers');
-        await handleCopyButtonClick(interaction);
-        return;
-      }
-      if (interaction.isRepliable()) {
-        await interaction.reply({
-          content: '⛔ This bot is only available in servers, not in DMs.',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-      return;
-    }
-
+  if (!interaction.inGuild()) {
+  if (interaction.isButton()) {
+    const { handleCopyButtonClick } = await import('../lib/button-helpers');
+    await handleCopyButtonClick(interaction);
+    return;
+  }
+  if (interaction.isRepliable()) {
+    await interaction.reply({
+      content: '⛔ This bot is only available in servers, not in DMs.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  return;
+  }
+  
     if (interaction.isChatInputCommand()) {
       const command = registry.get(interaction.commandName);
       if (!command) {
