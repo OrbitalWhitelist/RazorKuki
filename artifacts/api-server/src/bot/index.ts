@@ -216,29 +216,25 @@ export async function startBot(): Promise<void> {
     }
 
     const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
-    if (statusChannelId) {
-      try {
-        const channel = await client.channels.fetch(statusChannelId);
-        if (channel && channel.type === ChannelType.GuildVoice) {
-          await channel.setName('🟢 Razor Bot Online').catch(() => {});
-          logger.info('Status voice channel updated');
-        }
-      } catch (err) {
-        logger.error({ err }, 'Failed to set status voice channel');
-      }
-    }
-
-    setTimeout(async () => {
-      const sc = process.env.STATUS_VOICE_CHANNEL_ID;
-      if (sc) {
+    if (!statusChannelId) {
+      logger.warn('STATUS_VOICE_CHANNEL_ID not set – voice status disabled');
+    } else {
+      const updateVoiceStatus = async () => {
         try {
-          const ch = await client.channels.fetch(sc);
-          if (ch && ch.type === ChannelType.GuildVoice) {
-            await ch.setName('🟢 Razor Bot Online').catch(() => {});
+          const channel = await client.channels.fetch(statusChannelId);
+          if (channel && channel.type === ChannelType.GuildVoice) {
+            await channel.setName('🟢 Razor Bot Online');
+            logger.info('Voice channel set to online');
+          } else {
+            logger.warn('STATUS_VOICE_CHANNEL_ID is not a voice channel or not found');
           }
-        } catch {}
-      }
-    }, 3000);
+        } catch (err) {
+          logger.error({ err }, 'Failed to update voice channel on startup');
+        }
+      };
+      await updateVoiceStatus();
+      setTimeout(updateVoiceStatus, 3000);
+    }
   });
 
   const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
