@@ -150,6 +150,19 @@ export async function startBot(): Promise<void> {
       } else if (command === 'restart') {
         await message.reply('🔁 Restarting...');
         process.exit(0);
+        } else if (command === 'shutdown') {
+  const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
+  if (statusChannelId && message.guild) {
+    try {
+      const channel = await message.guild.channels.fetch(statusChannelId);
+      if (channel && channel.type === ChannelType.GuildVoice) {
+        await channel.setName('🔴 Razor Bot Offline').catch(() => {});
+      }
+    } catch {}
+  }
+  await message.reply('🛑 Shutting down...');
+  process.exit(0);
+      
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
