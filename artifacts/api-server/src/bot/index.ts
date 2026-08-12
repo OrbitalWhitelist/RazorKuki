@@ -161,8 +161,13 @@ export async function startBot(): Promise<void> {
     } catch {}
   }
   await message.reply('🛑 Shutting down...');
+  logger.info('Bot turned off.');
+  const { execSync } = require('child_process');
+  try {
+    execSync('pm2 stop razorbot', { stdio: 'ignore' });
+  } catch {}
   process.exit(0);
-      
+       
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
