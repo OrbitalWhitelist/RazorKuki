@@ -227,6 +227,18 @@ export async function startBot(): Promise<void> {
         logger.error({ err }, 'Failed to set status voice channel');
       }
     }
+
+    setTimeout(async () => {
+      const sc = process.env.STATUS_VOICE_CHANNEL_ID;
+      if (sc) {
+        try {
+          const ch = await client.channels.fetch(sc);
+          if (ch && ch.type === ChannelType.GuildVoice) {
+            await ch.setName('🟢 Razor Bot Online').catch(() => {});
+          }
+        } catch {}
+      }
+    }, 3000);
   });
 
   const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
