@@ -69,7 +69,7 @@ export async function startBot(): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
   if (ownerIds.length === 0) {
-    logger.warn('OWNER_IDS is empty – prefix commands (!runpanel, !send, !update, !restart) will be disabled.');
+    logger.warn('OWNER_IDS is empty – prefix commands (!runpanel, !send, !update, !restart, !shutdown) will be disabled.');
   } else {
     logger.info({ ownerIds }, 'OWNER_IDS loaded');
   }
@@ -150,24 +150,39 @@ export async function startBot(): Promise<void> {
       } else if (command === 'restart') {
         await message.reply('🔁 Restarting...');
         process.exit(0);
-        } else if (command === 'shutdown') {
-  const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
-  if (statusChannelId && message.guild) {
-    try {
-      const channel = await message.guild.channels.fetch(statusChannelId);
-      if (channel && channel.type === ChannelType.GuildVoice) {
-        await channel.setName('🔴 Razor Bot Offline').catch(() => {});
-      }
-    } catch {}
-  }
-  await message.reply('🛑 Shutting down...');
-  logger.info('Bot turned off.');
-  const { execSync } = require('child_process');
-  try {
-    execSync('pm2 stop razorbot', { stdio: 'ignore' });
-  } catch {}
-  process.exit(0);
-       
+      } else if (command === 'shutdown') {
+        console.log('[SHUTDOWN] Received shutdown command from', message.author.tag);
+        await message.reply('🛑 Shutting down...');
+
+        const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
+        if (statusChannelId && message.guild) {
+          try {
+            const channel = await message.guild.channels.fetch(statusChannelId);
+            if (channel && channel.type === ChannelType.GuildVoice) {
+              await channel.setName('🔴 Razor Bot Offline');
+              console.log('[SHUTDOWN] Voice channel set to offline');
+            }
+          } catch (err) {
+            console.error('[SHUTDOWN] Failed to set voice channel:', err);
+          }
+        }
+
+        console.log('[SHUTDOWN] Logging "Bot turned off."');
+        logger.info('Bot turned off.');
+
+        console.log('[SHUTDOWN] Stopping PM2 process...');
+        try {
+          const { execSync } = require('child_process');
+          execSync('pm2 stop razorbot', { stdio: 'ignore' });
+          console.log('[SHUTDOWN] PM2 stop command sent');
+        } catch (pm2Err) {
+          console.error('[SHUTDOWN] PM2 stop failed:', pm2Err);
+        }
+
+        setTimeout(() => {
+          console.log('[SHUTDOWN] Exiting process');
+          process.exit(0);
+        }, 1000);
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
