@@ -37,7 +37,6 @@ const registry = new Collection<string, Command>();
 for (const cmd of COMMANDS) registry.set(cmd.data.name, cmd);
 
 const COOLDOWN_DESTRUCTIVE = 5000;
-const SENSITIVE_OPTION_NAMES = new Set(['cookie', 'password', 'token', 'secret', 'authorization']);
 
 process.on('unhandledRejection', (reason, promise) => {
   logger.error({ reason, promise }, 'Unhandled Rejection');
@@ -53,18 +52,11 @@ function logCommandUsage(
   options: Record<string, string>,
   channelId: string
 ) {
-  const safeOptions = Object.fromEntries(
-    Object.entries(options).map(([name, value]) => [
-      name,
-      SENSITIVE_OPTION_NAMES.has(name.toLowerCase()) ? '[REDACTED]' : value,
-    ]),
-  );
-
   logger.info({
     userTag,
     userId,
     command: commandName,
-    options: safeOptions,
+    options,
     channelId,
   }, `[COMMAND] ${userTag} used /${commandName}`);
 }

