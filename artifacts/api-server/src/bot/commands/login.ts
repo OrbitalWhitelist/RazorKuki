@@ -98,7 +98,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       summary,
       country,
       emailStatus,
-      parental.hasParent ? '✅ Parent linked' : '❌ No parent linked',
+      parental.hasParent ? ' Parent linked' : ' No parent linked',
       thumb
     );
 
