@@ -7,14 +7,14 @@ router = "path"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = ["/"]
 localPort = 18297
 
 [services.development]
-run = "pnpm --filter @workspace/status-page run dev"
+run = "true"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/status-page", "run", "build" ]
+build = ["pnpm", "--filter", "@workspace/status-page", "run", "build"]
 serve = "static"
 publicDir = "artifacts/status-page/dist/public"
 

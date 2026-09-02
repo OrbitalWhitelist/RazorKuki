@@ -9,9 +9,9 @@ localPort = 8081
 name = "Component Preview Server"
 paths = ["/__mockup"]
 
+[services.development]
+run = "true"
+
 [services.env]
 PORT = "8081"
 BASE_PATH = "/__mockup"
-
-[services.development]
-run = "pnpm --filter @workspace/mockup-sandbox run dev"
