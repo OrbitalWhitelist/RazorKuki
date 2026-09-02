@@ -39,7 +39,11 @@ function sanitizeText(text: string): string {
     .replace(/Ã©/g, 'é')
     .replace(/Ã¨/g, 'è')
     .replace(/Ã¢/g, 'â')
-    .replace(/Ã™/g, '™');
+    .replace(/Ã™/g, '™')
+    .replace(/ðŸ¡/g, '🏡')
+    .replace(/ðŸŒ±/g, '🌱')
+    .replace(/ðŸŒ¶ï¸/g, '🌶️')
+    .replace(/ðŸ/g, '');
 }
 
 function plainSuccessEmbed(description: string, thumbnail?: string | null) {
@@ -163,7 +167,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         } catch {}
 
         totalIncoming += summary.incoming;
-        totalOutgoing += summary.outgoing;
+        totalOutgoing += Math.abs(summary.outgoing);
 
         const robux = account.robux ?? 0;
         const pending = account.robux_pending ?? 0;
@@ -223,6 +227,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         outputLines.push(`Robux: ${robux}`);
         outputLines.push(`Premium: ${premium}`);
         outputLines.push(`Cookie: ${newCookie}`);
+        outputLines.push(`Account Summary: Incoming ${summary.incoming} | Outgoing ${Math.abs(summary.outgoing)}`);
+        outputLines.push(`Gamepass Spent: ${gamepassSpent}`);
+        outputLines.push(`Gamepass Count: ${gamepassCount}`);
+        outputLines.push(`Email: ${email}`);
+        outputLines.push(`Birthdate: ${birthdate}`);
+        outputLines.push(`Age Group: ${ageGroup}`);
+        outputLines.push(`Two Factor: ${twoFactor}`);
+        outputLines.push(`Total RAP: ${rap}`);
+        outputLines.push(`Animations: ${animations}`);
+        outputLines.push(`Pending Robux: ${pending}`);
+        outputLines.push(`Roblox Credit: ${credit}`);
         outputLines.push(`Last Played Games: ${lastPlayedGamesList.join(' | ') || 'None'}`);
         outputLines.push('');
       } catch (err: any) {
