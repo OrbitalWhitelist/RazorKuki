@@ -62,7 +62,7 @@ function logCommandUsage(
 }
 
 export async function startBot(): Promise<void> {
-  const token = process.env['DISCORD_BOT_TOKEN'];
+  const token = process.env['DISCORD_BOT_TOKEN']?.trim();
 
   const ownerIds = (process.env['OWNER_IDS'] ?? '')
     .split(',')
@@ -344,5 +344,12 @@ export async function startBot(): Promise<void> {
     logger.warn('Bot disconnected');
   });
 
-  await client.login(token);
+  try {
+    await client.login(token);
+  } catch (err) {
+    if ((err as { code?: string }).code === 'TokenInvalid') {
+      logger.error('Discord rejected DISCORD_BOT_TOKEN — replace the secret with the current bot token and redeploy.');
+    }
+    throw err;
+  }
 }
