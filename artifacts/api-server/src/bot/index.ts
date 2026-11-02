@@ -9,6 +9,7 @@ import {
   ChannelType,
 } from 'discord.js';
 import { logger } from '../lib/logger';
+import { kickallCommand } from './commands/kickall';
 import { botState } from './status';
 import { resetCommand } from './commands/reset';
 import { loginCommand } from './commands/login';
@@ -31,6 +32,7 @@ const COMMANDS: Command[] = [
   refreshCommand,
   checkv2Command,
   panelCommand,
+  kickallCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -80,13 +82,14 @@ export async function startBot(): Promise<void> {
   }
 
   const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.GuildMessages,
-    ],
-    allowedMentions: { parse: [] },
-  });
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+  ],
+  allowedMentions: { parse: [] },
+});
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
