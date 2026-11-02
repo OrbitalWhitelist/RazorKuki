@@ -9,7 +9,6 @@ import {
   ChannelType,
 } from 'discord.js';
 import { logger } from '../lib/logger';
-import { kickallCommand } from './commands/kickall';
 import { botState } from './status';
 import { resetCommand } from './commands/reset';
 import { loginCommand } from './commands/login';
@@ -22,6 +21,7 @@ import { panelCommand, buildPanelEmbed, buildPanelSelect } from './commands/pane
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
 import { startHeartbeat } from '../lib/heartbeat';
+import { kickallCommand } from './commands/kickall';
 
 const COMMANDS: Command[] = [
   resetCommand,
