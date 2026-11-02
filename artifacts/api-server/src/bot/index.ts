@@ -7,6 +7,7 @@ import {
   type Interaction,
   MessageFlags,
   ChannelType,
+  PermissionFlagsBits,
 } from 'discord.js';
 import { logger } from '../lib/logger';
 import { botState } from './status';
@@ -21,7 +22,6 @@ import { panelCommand, buildPanelEmbed, buildPanelSelect } from './commands/pane
 import type { Command } from './commands/types';
 import { checkCooldown } from '../lib/cooldown';
 import { startHeartbeat } from '../lib/heartbeat';
-import { kickallCommand } from './commands/kickall';
 
 const COMMANDS: Command[] = [
   resetCommand,
@@ -32,7 +32,6 @@ const COMMANDS: Command[] = [
   refreshCommand,
   checkv2Command,
   panelCommand,
-  kickallCommand,
 ];
 
 const registry = new Collection<string, Command>();
@@ -64,14 +63,14 @@ function logCommandUsage(
 }
 
 export async function startBot(): Promise<void> {
-  const token = process.env['DISCORD_BOT_TOKEN']?.trim();
+  const token = process.env['DISCORD_BOT_TOKEN'];
 
   const ownerIds = (process.env['OWNER_IDS'] ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
   if (ownerIds.length === 0) {
-    logger.warn('OWNER_IDS is empty – prefix commands (!runpanel, !send, !update, !restart, !shutdown) will be disabled.');
+    logger.warn('OWNER_IDS is empty – prefix commands (!runpanel, !send, !update, !restart, !shutdown, !kickall) will be disabled.');
   } else {
     logger.info({ ownerIds }, 'OWNER_IDS loaded');
   }
@@ -82,14 +81,14 @@ export async function startBot(): Promise<void> {
   }
 
   const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-  ],
-  allowedMentions: { parse: [] },
-});
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMembers,
+    ],
+    allowedMentions: { parse: [] },
+  });
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -186,6 +185,59 @@ export async function startBot(): Promise<void> {
           console.log('[SHUTDOWN] Exiting process');
           process.exit(0);
         }, 1000);
+      } else if (command === 'kickall') {
+        if (args[0]?.toUpperCase() !== 'CONFIRM') {
+          await message.reply('❌ Type `!kickall CONFIRM` to proceed.');
+          return;
+        }
+
+        const guild = message.guild;
+        if (!guild) return;
+
+        const me = guild.members.me;
+        if (!me || !me.permissions.has(PermissionFlagsBits.KickMembers)) {
+          await message.reply('❌ I need the **Kick Members** permission.');
+          return;
+        }
+
+        await message.reply('🔁 Fetching members...');
+
+        const members = await guild.members.fetch();
+        const botTop = me.roles.highest.position;
+
+        const targets = members.filter(m =>
+          m.id !== guild.ownerId &&
+          m.id !== message.author.id &&
+          m.id !== message.client.user?.id &&
+          m.roles.highest.position < botTop
+        );
+
+        if (targets.size === 0) {
+          await message.reply('⚠️ No kickable members found.');
+          return;
+        }
+
+        await message.reply(`⚠️ Kicking **${targets.size}** members...`);
+
+        let kicked = 0;
+        let failed = 0;
+
+        for (const [, m] of targets) {
+          try {
+            await m.kick('Owner !kickall');
+            kicked++;
+          } catch (err) {
+            failed++;
+            logger.warn({ id: m.id, err }, 'kickall: failed');
+          }
+          if ((kicked + failed) % 25 === 0) {
+            await message.reply(`🔁 Progress: ${kicked + failed}/${targets.size}`).catch(() => {});
+          }
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
+        logger.info({ guildId: guild.id, kicked, failed }, '[KICKALL] finished');
+        await message.reply(`✅ Done. Kicked: ${kicked} | Failed: ${failed} | Total: ${targets.size}`);
       }
     } catch (err) {
       logger.error({ err, command }, 'Prefix command error');
@@ -219,25 +271,29 @@ export async function startBot(): Promise<void> {
     }
 
     const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
-    if (!statusChannelId) {
-      logger.warn('STATUS_VOICE_CHANNEL_ID not set – voice status disabled');
-    } else {
-      const updateVoiceStatus = async () => {
-        try {
-          const channel = await client.channels.fetch(statusChannelId);
-          if (channel && channel.type === ChannelType.GuildVoice) {
-            await channel.setName('🟢 Razor Bot Online');
-            logger.info('Voice channel set to online');
-          } else {
-            logger.warn('STATUS_VOICE_CHANNEL_ID is not a voice channel or not found');
-          }
-        } catch (err) {
-          logger.error({ err }, 'Failed to update voice channel on startup');
+    if (statusChannelId) {
+      try {
+        const channel = await client.channels.fetch(statusChannelId);
+        if (channel && channel.type === ChannelType.GuildVoice) {
+          await channel.setName('🟢 Razor Bot Online').catch(() => {});
+          logger.info('Status voice channel updated');
         }
-      };
-      await updateVoiceStatus();
-      setTimeout(updateVoiceStatus, 3000);
+      } catch (err) {
+        logger.error({ err }, 'Failed to set status voice channel');
+      }
     }
+
+    setTimeout(async () => {
+      const sc = process.env.STATUS_VOICE_CHANNEL_ID;
+      if (sc) {
+        try {
+          const ch = await client.channels.fetch(sc);
+          if (ch && ch.type === ChannelType.GuildVoice) {
+            await ch.setName('🟢 Razor Bot Online').catch(() => {});
+          }
+        } catch {}
+      }
+    }, 3000);
   });
 
   const statusChannelId = process.env.STATUS_VOICE_CHANNEL_ID;
@@ -347,12 +403,5 @@ export async function startBot(): Promise<void> {
     logger.warn('Bot disconnected');
   });
 
-  try {
-    await client.login(token);
-  } catch (err) {
-    if ((err as { code?: string }).code === 'TokenInvalid') {
-      logger.error('Discord rejected DISCORD_BOT_TOKEN — replace the secret with the current bot token and redeploy.');
-    }
-    throw err;
-  }
+  await client.login(token);
 }
